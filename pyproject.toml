@@ -1,0 +1,43 @@
+[project]
+name = "pytest-testinel"
+version = "0.1.0"
+description = "Testinel’s pytest plugin captures structured test execution data directly from pytest and sends it to Testinel, where your test results become searchable, comparable, and actually useful."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name="Volodymyr Obrizan", email="obrizan@first.institute" },
+]
+dependencies = [
+    "pytest>=7",
+    "requests>=2",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Development Status :: 4 - Beta",
+    "Framework :: Pytest",
+    "Topic :: Software Development :: Testing",
+]
+license = "MIT"
+license-files = ["LICENSE"]
+
+[project.urls]
+Homepage = "https://github.com/Testinel/pytest-testinel"
+Issues = "https://github.com/Testinel/pytest-testinel/issues"
+
+[project.entry-points.pytest11]
+myproject = "pytest_testinel.testinel"
+
+[build-system]
+requires = [
+    "uv_build >= 0.9.18, <0.10.0",
+    "ruff>=0.14.10",
+    "twine>=6.2.0",
+]
+build-backend = "uv_build"
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
