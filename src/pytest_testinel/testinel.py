@@ -7,7 +7,7 @@ from typing import Callable, Generator, Any, Final, Set
 import pytest
 from _pytest._code.code import ExceptionChainRepr
 
-from .results_reporter import ResultsReporter
+from .results_reporter import NoopReportingBackend, ResultsReporter
 
 ENV_VAR_WHITELIST: Final[Set] = {
     "CI",
@@ -33,9 +33,21 @@ ENV_VAR_WHITELIST: Final[Set] = {
     "BITBUCKET_STEP_RUN_NUMBER",
 }
 
-test_reporter = ResultsReporter(
-    dsn=os.environ["TESTINEL_DSN"],
-)
+_test_reporter: ResultsReporter | None = None
+
+
+def _get_test_reporter() -> ResultsReporter:
+    global _test_reporter
+    if _test_reporter is None:
+        dsn = os.environ.get("TESTINEL_DSN")
+        if not dsn:
+            _test_reporter = ResultsReporter(
+                dsn="",
+                backend=NoopReportingBackend(),
+            )
+        else:
+            _test_reporter = ResultsReporter(dsn=dsn)
+    return _test_reporter
 
 
 def serialize_repr(long_repr: ExceptionChainRepr) -> dict:
@@ -87,7 +99,7 @@ def pytest_runtest_makereport(
 
         repr_info = serialize_repr(report.longrepr)
 
-    test_reporter.report_event(
+    _get_test_reporter().report_event(
         event=report.when,
         payload={
             "test": to_test_dict(item),
@@ -115,7 +127,7 @@ def pytest_runtest_makereport(
 @pytest.fixture(scope="session", autouse=True)
 def reporter(request):
     config = request.config
-    test_reporter.report_start(
+    _get_test_reporter().report_start(
         payload={
             "args": config.args,
             "options": vars(config.option),
@@ -125,9 +137,9 @@ def reporter(request):
         }
     )
     yield
-    test_reporter.report_end()
+    _get_test_reporter().report_end()
 
 
 def pytest_collection_finish(session):
     tests = [to_test_dict(item) for item in session.items]
-    test_reporter.tests = tests
+    _get_test_reporter().tests = tests

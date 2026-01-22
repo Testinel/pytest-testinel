@@ -1,4 +1,5 @@
-import abc, datetime, json, uuid
+import abc, datetime, json, os, uuid
+from urllib.parse import unquote, urlparse
 
 import requests
 
@@ -11,6 +12,11 @@ class ReportingBackend(abc.ABC):
         return
 
     def on_end(self) -> None:
+        return
+
+
+class NoopReportingBackend(ReportingBackend):
+    def record_event(self, event: dict) -> None:
         return
 
 
@@ -55,7 +61,25 @@ class ResultsReporter:
         if backend:
             self.backend = backend
         else:
-            self.backend = HttpReportingBackend(url=dsn)
+            self.backend = self._backend_from_dsn(dsn)
+
+    def _backend_from_dsn(self, dsn: str) -> ReportingBackend:
+        parsed = urlparse(dsn)
+        if parsed.scheme in {"http", "https"}:
+            return HttpReportingBackend(url=dsn)
+        if parsed.scheme == "file":
+            if parsed.netloc:
+                raise ValueError(
+                    "Unsupported file DSN with host component. Use file:///path/to/file."
+                )
+            filename = unquote(parsed.path)
+            return FileReportingBackend(filename=filename)
+        if parsed.scheme == "":
+            return FileReportingBackend(filename=os.fspath(dsn))
+        raise ValueError(
+            f"Unsupported TESTINEL_DSN scheme '{parsed.scheme}'. "
+            "Use https://... or file:///path/to/file."
+        )
 
     def report_start(self, payload: dict) -> None:
         self.backend.on_start()
