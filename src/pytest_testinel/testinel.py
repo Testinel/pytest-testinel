@@ -50,6 +50,42 @@ def _get_test_reporter() -> ResultsReporter:
     return _test_reporter
 
 
+def _safe_path(value: object) -> str:
+    try:
+        path = os.fspath(value)
+    except TypeError:
+        return str(value)
+    if isinstance(path, bytes):
+        try:
+            return path.decode()
+        except Exception:
+            return str(path)
+    return path
+
+
+def _patch_selenium_save_screenshot() -> None:
+    try:
+        from selenium.webdriver.remote.webdriver import WebDriver
+    except Exception:
+        return
+
+    original = getattr(WebDriver, "save_screenshot", None)
+    if original is None or getattr(original, "_testinel_patched", False):
+        return
+
+    def patched(self, filename, *args, **kwargs):
+        result = original(self, filename, *args, **kwargs)
+        try:
+            _get_test_reporter().report_screenshot(_safe_path(filename))
+        except Exception:
+            return result
+        return result
+
+    patched._testinel_patched = True
+    patched._testinel_original = original
+    WebDriver.save_screenshot = patched
+
+
 def serialize_repr(long_repr: ExceptionChainRepr) -> dict:
     return asdict(long_repr)
 
@@ -143,3 +179,6 @@ def reporter(request):
 def pytest_collection_finish(session):
     tests = [to_test_dict(item) for item in session.items]
     _get_test_reporter().tests = tests
+
+
+_patch_selenium_save_screenshot()
