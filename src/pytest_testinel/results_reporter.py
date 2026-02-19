@@ -145,7 +145,7 @@ class ResultsReporter:
                 "event": event,
                 "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                 "payload": payload,
-                "screenshots": self.screenshots
+                "screenshots": self.screenshots,
             }
         )
         self.screenshots = []

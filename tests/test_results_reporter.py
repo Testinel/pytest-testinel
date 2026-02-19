@@ -44,7 +44,9 @@ def test_results_reporter_uses_explicit_backend() -> None:
     assert backend.events[0]["run_id"] == backend.events[1]["run_id"]
 
 
-def test_results_reporter_http_backend_posts_events(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_results_reporter_http_backend_posts_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[dict] = []
 
     def fake_post(url: str, json: dict, verify: bool) -> None:

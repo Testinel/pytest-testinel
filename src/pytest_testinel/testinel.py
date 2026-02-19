@@ -2,36 +2,13 @@ import os
 import traceback
 from dataclasses import asdict
 from itertools import dropwhile
-from typing import Callable, Generator, Any, Final, Set
+from typing import Callable, Generator, Any
 
 import pytest
 from _pytest._code.code import ExceptionChainRepr
 
+from .env_vars import ENV_VAR_WHITELIST
 from .results_reporter import NoopReportingBackend, ResultsReporter
-
-ENV_VAR_WHITELIST: Final[Set] = {
-    "CI",
-    "BITBUCKET_BUILD_NUMBER",
-    "BITBUCKET_COMMIT",
-    "BITBUCKET_WORKSPACE",
-    "BITBUCKET_REPO_SLUG",
-    "BITBUCKET_REPO_UUID",
-    "BITBUCKET_REPO_FULL_NAME",
-    "BITBUCKET_BRANCH",
-    "BITBUCKET_TAG",
-    "BITBUCKET_BOOKMARK",
-    "BITBUCKET_PARALLEL_STEP",
-    "BITBUCKET_PARALLEL_STEP_COUNT",
-    "BITBUCKET_PR_ID",
-    "BITBUCKET_PR_DESTINATION_BRANCH",
-    "BITBUCKET_GIT_HTTP_ORIGIN",
-    "BITBUCKET_GIT_SSH_ORIGIN",
-    "BITBUCKET_STEP_UUID",
-    "BITBUCKET_PIPELINE_UUID",
-    "BITBUCKET_PROJECT_KEY",
-    "BITBUCKET_PROJECT_UUID",
-    "BITBUCKET_STEP_RUN_NUMBER",
-}
 
 _test_reporter: ResultsReporter | None = None
 
