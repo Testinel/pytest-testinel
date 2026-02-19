@@ -35,3 +35,21 @@ export TESTINEL_DSN="file:///tmp/testinel-results.json"
 # Or use a direct file path
 export TESTINEL_DSN="./testinel-results.json"
 ```
+
+### Recommended pytest flags
+
+For better debugging and richer failure context, it is highly recommended to run pytest with:
+
+`--showlocals --tb=long -vv`
+
+Why:
+
+- `--showlocals`: includes local variable values in tracebacks, which makes root-cause analysis much faster.
+- `--tb=long`: shows full, non-truncated tracebacks so you can see complete failure paths.
+- `-vv`: increases verbosity, showing more detailed test identifiers and execution output.
+
+Example:
+
+```bash
+pytest --showlocals --tb=long -vv
+```
