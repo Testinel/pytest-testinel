@@ -1,6 +1,6 @@
 [project]
 name = "pytest-testinel"
-version = "0.3.1"
+version = "0.4.0"
 description = "Testinel’s pytest plugin captures structured test execution data directly from pytest and sends it to Testinel, where your test results become searchable, comparable, and actually useful."
 readme = "README.md"
 requires-python = ">=3.10"
