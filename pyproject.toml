@@ -1,6 +1,6 @@
 [project]
 name = "pytest-testinel"
-version = "0.4.0"
+version = "0.4.1"
 description = "Testinel’s pytest plugin captures structured test execution data directly from pytest and sends it to Testinel, where your test results become searchable, comparable, and actually useful."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,7 +22,8 @@ license = "MIT"
 license-files = ["LICENSE"]
 
 [project.urls]
-Homepage = "https://github.com/Testinel/pytest-testinel"
+Homepage = "https://testinel.first.institute"
+Repository = "https://github.com/Testinel/pytest-testinel"
 Issues = "https://github.com/Testinel/pytest-testinel/issues"
 
 [project.entry-points.pytest11]
