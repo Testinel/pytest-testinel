@@ -22,6 +22,8 @@ ENV_VAR_WHITELIST: Final[Set] = {
     "BITBUCKET_PROJECT_KEY",
     "BITBUCKET_PROJECT_UUID",
     "BITBUCKET_STEP_RUN_NUMBER",
+    "BITBUCKET_STEP_TRIGGERER_UUID",
+    "BITBUCKET_STEP_RUN_NUMBER",
     # GitHub actions: https://docs.github.com/en/actions/reference/workflows-and-actions/variables
     "GITHUB_ACTION",
     "GITHUB_ACTION_PATH",
