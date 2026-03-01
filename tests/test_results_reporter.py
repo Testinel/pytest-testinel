@@ -39,8 +39,11 @@ def test_results_reporter_uses_explicit_backend() -> None:
     assert backend.started is True
     assert backend.ended is True
     assert backend.events[0]["event"] == "start"
+    assert backend.events[0]["sdk"]["name"] == "testinel.pytest"
+    assert "version" in backend.events[0]["sdk"]
     assert backend.events[0]["tests"] == reporter.tests
     assert backend.events[1]["event"] == "end"
+    assert "sdk" not in backend.events[1]
     assert backend.events[0]["run_id"] == backend.events[1]["run_id"]
 
 
@@ -49,8 +52,8 @@ def test_results_reporter_http_backend_posts_events(
 ) -> None:
     calls: list[dict] = []
 
-    def fake_post(url: str, json: dict, verify: bool) -> None:
-        calls.append({"url": url, "json": json, "verify": verify})
+    def fake_post(url: str, json: dict, headers: dict, verify: bool) -> None:
+        calls.append({"url": url, "json": json, "headers": headers, "verify": verify})
 
     monkeypatch.setattr(results_reporter.requests, "post", fake_post)
 
@@ -60,6 +63,9 @@ def test_results_reporter_http_backend_posts_events(
     assert isinstance(reporter.backend, HttpReportingBackend)
     assert calls[0]["url"] == "https://example.test/ingest"
     assert calls[0]["json"]["event"] == "call"
+    assert "sdk" not in calls[0]["json"]
+    assert calls[0]["headers"]["User-Agent"].startswith("testinel.pytest/")
+    assert calls[0]["headers"]["X-Testinel-Client"].startswith("testinel.pytest/")
     assert calls[0]["verify"] is False
 
 

@@ -1,7 +1,36 @@
 import abc, datetime, json, os, queue, threading, uuid
+from importlib.metadata import PackageNotFoundError, version
 from urllib.parse import unquote, urlparse
 
 import requests
+
+SDK_NAME = "testinel.pytest"
+PACKAGE_NAME = "pytest-testinel"
+UNKNOWN_VERSION = "unknown"
+
+
+def _get_sdk_version() -> str:
+    try:
+        return version(PACKAGE_NAME)
+    except PackageNotFoundError:
+        return UNKNOWN_VERSION
+
+
+def _build_sdk_info() -> dict:
+    sdk_version = _get_sdk_version()
+    return {
+        "name": SDK_NAME,
+        "version": sdk_version,
+        "packages": [{"name": f"pypi:{PACKAGE_NAME}", "version": sdk_version}],
+    }
+
+
+def _build_http_headers() -> dict[str, str]:
+    client = f"{SDK_NAME}/{_get_sdk_version()}"
+    return {
+        "User-Agent": client,
+        "X-Testinel-Client": client,
+    }
 
 
 class ReportingBackend(abc.ABC):
@@ -53,15 +82,21 @@ class FileReportingBackend(ReportingBackend):
 class HttpReportingBackend(ReportingBackend):
     url: str
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, headers: dict[str, str] | None = None):
         self.url = url
+        self.headers = headers or {}
 
     def record_event(self, event: dict) -> None:
-        requests.post(self.url, json=event, verify=False)
+        requests.post(self.url, json=event, headers=self.headers, verify=False)
 
     def request_upload_link(self, filename: str) -> dict | None:
         upload_url = f"{self.url.rstrip('/')}/screenshots/upload-link/"
-        response = requests.post(upload_url, json={"filename": filename}, verify=False)
+        response = requests.post(
+            upload_url,
+            json={"filename": filename},
+            headers=self.headers,
+            verify=False,
+        )
         response.raise_for_status()
         return response.json()
 
@@ -97,7 +132,7 @@ class ResultsReporter:
     def _backend_from_dsn(self, dsn: str) -> ReportingBackend:
         parsed = urlparse(dsn)
         if parsed.scheme in {"http", "https"}:
-            return HttpReportingBackend(url=dsn)
+            return HttpReportingBackend(url=dsn, headers=_build_http_headers())
         if parsed.scheme == "file":
             if parsed.netloc:
                 raise ValueError(
@@ -119,6 +154,7 @@ class ResultsReporter:
                 "run_id": self.run_id,
                 "event": "start",
                 "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                "sdk": _build_sdk_info(),
                 "payload": payload,
                 "tests": self.tests,
             }
