@@ -46,7 +46,7 @@ class ReportingBackend(abc.ABC):
     def request_upload_link(self, filename: str) -> dict | None:
         return None
 
-    def upload_screenshot(
+    def upload_file(
         self,
         upload_url: str,
         method: str,
@@ -90,7 +90,7 @@ class HttpReportingBackend(ReportingBackend):
         requests.post(self.url, json=event, headers=self.headers, verify=False)
 
     def request_upload_link(self, filename: str) -> dict | None:
-        upload_url = f"{self.url.rstrip('/')}/screenshots/upload-link/"
+        upload_url = f"{self.url.rstrip('/')}/attachment/upload-link/"
         response = requests.post(
             upload_url,
             json={"filename": filename},
@@ -100,7 +100,7 @@ class HttpReportingBackend(ReportingBackend):
         response.raise_for_status()
         return response.json()
 
-    def upload_screenshot(
+    def upload_file(
         self,
         upload_url: str,
         method: str,
@@ -121,7 +121,7 @@ class ResultsReporter:
         self.dsn = dsn
         self.run_id = str(uuid.uuid4())
         self.tests = []
-        self.screenshots: list[str] = []
+        self.attachments: list[str] = []
         self._upload_queue: queue.Queue | None = None
         self._uploader: threading.Thread | None = None
         if backend:
@@ -181,12 +181,12 @@ class ResultsReporter:
                 "event": event,
                 "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                 "payload": payload,
-                "screenshots": self.screenshots,
+                "screenshots": self.attachments,
             }
         )
-        self.screenshots = []
+        self.attachments = []
 
-    def report_screenshot(self, filename: str) -> None:
+    def report_attachment(self, filename: str) -> None:
         upload_info = None
         try:
             upload_info = self.backend.request_upload_link(filename)
@@ -194,14 +194,14 @@ class ResultsReporter:
             upload_info = None
 
         if not upload_info:
-            self.screenshots.append(filename)
+            self.attachments.append(filename)
             return
 
         object_key = upload_info.get("object_key")
         if object_key:
-            self.screenshots.append(object_key)
+            self.attachments.append(object_key)
         else:
-            self.screenshots.append(filename)
+            self.attachments.append(filename)
 
         self._ensure_uploader()
         upload_url = upload_info.get("upload_url")
@@ -216,7 +216,7 @@ class ResultsReporter:
         self._upload_queue = queue.Queue()
         self._uploader = threading.Thread(
             target=self._upload_loop,
-            name="testinel-screenshot-uploader",
+            name="testinel-file-uploader",
             daemon=True,
         )
         self._uploader.start()
@@ -230,7 +230,7 @@ class ResultsReporter:
                 break
             upload_url, method, headers, filename = item
             try:
-                self.backend.upload_screenshot(
+                self.backend.upload_file(
                     upload_url=upload_url,
                     method=method,
                     headers=headers,

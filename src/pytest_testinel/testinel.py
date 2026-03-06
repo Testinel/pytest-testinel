@@ -57,7 +57,7 @@ def _patch_selenium_save_screenshot() -> None:
     def patched(self: Any, filename: Any, *args: Any, **kwargs: Any) -> Any:
         result = original(self, filename, *args, **kwargs)
         try:
-            _get_test_reporter().report_screenshot(_safe_path(filename))
+            _get_test_reporter().report_attachment(_safe_path(filename))
         except Exception:
             return result
         return result
@@ -115,6 +115,12 @@ def pytest_runtest_makereport(
         }
 
         repr_info = serialize_repr(report.longrepr)
+
+    if output_path := item.funcargs.get("output_path"):
+        # Probably, it is Playwright traces
+        for dirpath, dirnames, filenames in os.walk(output_path):
+            for filename in filenames:
+                _get_test_reporter().report_attachment(os.path.join(dirpath, filename))
 
     _get_test_reporter().report_event(
         event=report.when,
