@@ -53,3 +53,22 @@ Example:
 ```bash
 pytest --showlocals --tb=long -vv
 ```
+
+### Recommended Playwright flags
+
+If you run browser tests with `pytest-playwright`, these flags provide better artifacts for debugging:
+
+`--tracing=retain-on-failure --video=retain-on-failure --screenshot=only-on-failure --output=test-results`
+
+Why:
+
+- `--tracing=retain-on-failure`: captures a full Playwright trace for failed tests only.
+- `--video=retain-on-failure`: keeps video recordings only for failed tests.
+- `--screenshot=only-on-failure`: saves screenshots at failure time.
+- `--output=test-results`: stores artifacts in a predictable directory.
+
+Example:
+
+```bash
+pytest --tracing=retain-on-failure --video=retain-on-failure --screenshot=only-on-failure --output=test-results
+```
