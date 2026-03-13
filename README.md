@@ -36,6 +36,22 @@ export TESTINEL_DSN="file:///tmp/testinel-results.json"
 export TESTINEL_DSN="./testinel-results.json"
 ```
 
+Set Testinel plugin log level with `--testinel-log-level`.
+
+Supported values:
+
+- `DEBUG`
+- `INFO`
+- `WARNING` (default)
+- `ERROR`
+- `CRITICAL`
+
+Example:
+
+```bash
+pytest --testinel-log-level=INFO
+```
+
 ### Recommended pytest flags
 
 For better debugging and richer failure context, it is highly recommended to run pytest with:

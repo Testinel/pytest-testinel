@@ -1,12 +1,19 @@
-import abc, datetime, json, os, queue, threading, uuid
+import os, queue, threading, uuid, logging
+from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from urllib.parse import unquote, urlparse
 
-import requests
+from requests import Response
+
+from pytest_testinel.file_reporting_backend import FileReportingBackend
+from pytest_testinel.http_reporting_backend import HttpReportingBackend
+from pytest_testinel.reporting_backend import ReportingBackend
 
 SDK_NAME = "testinel.pytest"
 PACKAGE_NAME = "pytest-testinel"
 UNKNOWN_VERSION = "unknown"
+
+logger = logging.getLogger("testinel")
 
 
 def _get_sdk_version() -> str:
@@ -33,84 +40,6 @@ def _build_http_headers() -> dict[str, str]:
     }
 
 
-class ReportingBackend(abc.ABC):
-    @abc.abstractmethod
-    def record_event(self, event: dict) -> None: ...
-
-    def on_start(self) -> None:
-        return
-
-    def on_end(self) -> None:
-        return
-
-    def request_upload_link(self, filename: str) -> dict | None:
-        return None
-
-    def upload_file(
-        self,
-        upload_url: str,
-        method: str,
-        headers: dict,
-        filename: str,
-    ) -> None:
-        return
-
-
-class NoopReportingBackend(ReportingBackend):
-    def record_event(self, event: dict) -> None:
-        return
-
-
-class FileReportingBackend(ReportingBackend):
-    events: list[dict]
-    filename: str
-    indent: int | None
-
-    def __init__(self, filename: str, indent: int | None = None):
-        self.events = []
-        self.filename = filename
-        self.indent = indent
-
-    def record_event(self, event: dict) -> None:
-        self.events.append(event)
-
-    def on_end(self) -> None:
-        with open(self.filename, "w", encoding="utf-8") as f:
-            json.dump(self.events, f, indent=self.indent)
-
-
-class HttpReportingBackend(ReportingBackend):
-    url: str
-
-    def __init__(self, url: str, headers: dict[str, str] | None = None):
-        self.url = url
-        self.headers = headers or {}
-
-    def record_event(self, event: dict) -> None:
-        requests.post(self.url, json=event, headers=self.headers, verify=False)
-
-    def request_upload_link(self, filename: str) -> dict | None:
-        upload_url = f"{self.url.rstrip('/')}/attachment/upload-link/"
-        response = requests.post(
-            upload_url,
-            json={"filename": filename},
-            headers=self.headers,
-            verify=False,
-        )
-        response.raise_for_status()
-        return response.json()
-
-    def upload_file(
-        self,
-        upload_url: str,
-        method: str,
-        headers: dict,
-        filename: str,
-    ) -> None:
-        with open(filename, "rb") as f:
-            requests.request(method, upload_url, data=f, headers=headers)
-
-
 class ResultsReporter:
     run_id: str
     dsn: str
@@ -122,8 +51,13 @@ class ResultsReporter:
         self.run_id = str(uuid.uuid4())
         self.tests = []
         self.attachments: list[str] = []
-        self._upload_queue: queue.Queue | None = None
-        self._uploader: threading.Thread | None = None
+        self._upload_queue: queue.Queue = queue.Queue()
+        self._uploader: threading.Thread = threading.Thread(
+            target=self._upload_loop,
+            name="testinel-file-uploader",
+            daemon=True,
+        )
+        self._uploader.start()
         if backend:
             self.backend = backend
         else:
@@ -149,48 +83,51 @@ class ResultsReporter:
 
     def report_start(self, payload: dict) -> None:
         self.backend.on_start()
+        sdk_info = _build_sdk_info()
         self.backend.record_event(
             {
                 "run_id": self.run_id,
                 "event": "start",
-                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-                "sdk": _build_sdk_info(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "sdk": sdk_info,
                 "payload": payload,
                 "tests": self.tests,
             }
         )
+        logger.info(f"Reporting started. Testinel info: {sdk_info}")
 
     def report_end(self) -> None:
-        if self._upload_queue is not None:
-            self._upload_queue.put(None)
-        if self._uploader is not None:
-            self._uploader.join(timeout=10)
+        self._upload_queue.put(None)
+        self._uploader.join()
         self.backend.record_event(
             {
                 "run_id": self.run_id,
                 "event": "end",
-                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         )
         self.backend.on_end()
+        logger.info("Reporting ended.")
 
     def report_event(self, event: str, payload: dict) -> None:
         self.backend.record_event(
             {
                 "run_id": self.run_id,
                 "event": event,
-                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "payload": payload,
                 "screenshots": self.attachments,
             }
         )
         self.attachments = []
+        logger.info(f"Event '{event}' reported.")
 
     def report_attachment(self, filename: str) -> None:
         upload_info = None
         try:
             upload_info = self.backend.request_upload_link(filename)
-        except Exception:
+        except Exception as exc:
+            logger.exception(f"Requesting upload link failed for '{filename}'.")
             upload_info = None
 
         if not upload_info:
@@ -203,40 +140,37 @@ class ResultsReporter:
         else:
             self.attachments.append(filename)
 
-        self._ensure_uploader()
         upload_url = upload_info.get("upload_url")
         method = upload_info.get("method", "PUT")
         headers = upload_info.get("headers", {})
-        if self._upload_queue is not None and upload_url:
-            self._upload_queue.put((upload_url, method, headers, filename))
-
-    def _ensure_uploader(self) -> None:
-        if self._uploader is not None:
-            return
-        self._upload_queue = queue.Queue()
-        self._uploader = threading.Thread(
-            target=self._upload_loop,
-            name="testinel-file-uploader",
-            daemon=True,
-        )
-        self._uploader.start()
+        self._upload_queue.put((upload_url, method, headers, filename))
+        logger.info(f"Attachment '{filename}' put to the uploading queue.")
 
     def _upload_loop(self) -> None:
-        if self._upload_queue is None:
-            return
+        logger.info("Upload loop started.")
         while True:
             item = self._upload_queue.get()
             if item is None:
-                break
+                self._upload_queue.task_done()
+                logger.info("Received 'None'. Upload loop exited.")
+                return
             upload_url, method, headers, filename = item
+            logger.info(f"Received upload task: '{filename}'.")
             try:
-                self.backend.upload_file(
+                resp = self.backend.upload_file(
                     upload_url=upload_url,
                     method=method,
                     headers=headers,
                     filename=filename,
                 )
+                if isinstance(resp, Response):
+                    if resp.ok:
+                        logger.info(f"File '{filename}' uploaded.")
+                    else:
+                        logger.error(
+                            f"Upload failed for '{filename}'. Status: {resp.status_code}, content: {resp.content!r}"
+                        )
             except Exception:
-                pass
+                logger.exception(f"Upload for '{filename}' failed.")
             finally:
                 self._upload_queue.task_done()

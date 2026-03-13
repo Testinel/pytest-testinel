@@ -1,17 +1,22 @@
 import os
+import logging
+import sys
 import traceback
+from os import PathLike
 from dataclasses import asdict
 from itertools import dropwhile
-from os import PathLike
-from typing import Any, Callable, Generator, cast
+from typing import Any, Generator
 
 import pytest
 from _pytest._code.code import ExceptionChainRepr
 
 from .env_vars import ENV_VAR_WHITELIST
-from .results_reporter import NoopReportingBackend, ResultsReporter
+from .results_reporter import ResultsReporter
+from .noop_reporting_backend import NoopReportingBackend
 
 _test_reporter: ResultsReporter | None = None
+
+logger = logging.getLogger("testinel")
 
 
 def _get_test_reporter() -> ResultsReporter:
@@ -160,12 +165,44 @@ def reporter(request: pytest.FixtureRequest) -> Generator[None, None, None]:
         }
     )
     yield
+
+
+def pytest_sessionfinish(session, exitstatus):
     _get_test_reporter().report_end()
+    logger.info("Testinel completed.")
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
     tests = [to_test_dict(item) for item in session.items]
     _get_test_reporter().tests = tests
+
+
+def pytest_addoption(parser):
+    group = parser.getgroup("testinel")
+    group.addoption(
+        "--testinel-log-level",
+        action="store",
+        default="WARNING",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Log level for Testinel plugin",
+    )
+
+
+def pytest_configure(config):
+    level_name = config.getoption("--testinel-log-level")
+    level = getattr(logging, level_name, logging.WARNING)
+
+    logger.setLevel(level)
+
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        formatter = logging.Formatter(
+            "[%(asctime)s] %(levelname)s %(name)s [%(threadName)s] %(message)s"
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    logger.propagate = False
 
 
 _patch_selenium_save_screenshot()

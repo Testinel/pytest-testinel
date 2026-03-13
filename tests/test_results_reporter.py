@@ -3,15 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from pytest_testinel import results_reporter
+from pytest_testinel import http_reporting_backend, reporting_backend
 from pytest_testinel.results_reporter import (
-    FileReportingBackend,
-    HttpReportingBackend,
     ResultsReporter,
 )
+from pytest_testinel.file_reporting_backend import FileReportingBackend
+from pytest_testinel.http_reporting_backend import HttpReportingBackend
 
 
-class DummyBackend(results_reporter.ReportingBackend):
+class DummyBackend(reporting_backend.ReportingBackend):
     def __init__(self) -> None:
         self.events: list[dict] = []
         self.started = False
@@ -55,7 +55,7 @@ def test_results_reporter_http_backend_posts_events(
     def fake_post(url: str, json: dict, headers: dict, verify: bool) -> None:
         calls.append({"url": url, "json": json, "headers": headers, "verify": verify})
 
-    monkeypatch.setattr(results_reporter.requests, "post", fake_post)
+    monkeypatch.setattr(http_reporting_backend.requests, "post", fake_post)
 
     reporter = ResultsReporter(dsn="https://example.test/ingest")
     reporter.report_event(event="call", payload={"ok": True})
@@ -100,3 +100,34 @@ def test_results_reporter_file_dsn_with_host_is_invalid() -> None:
 def test_results_reporter_unsupported_scheme_is_invalid() -> None:
     with pytest.raises(ValueError, match="Unsupported TESTINEL_DSN scheme"):
         ResultsReporter(dsn="ftp://example.test/results.json")
+
+
+def test_results_reporter_waits_for_uploads_before_end() -> None:
+    class DummyQueue:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object | None]] = []
+
+        def join(self) -> None:
+            self.calls.append(("join", None))
+
+        def put(self, item: object) -> None:
+            self.calls.append(("put", item))
+
+    class DummyThread:
+        def __init__(self) -> None:
+            self.join_timeout: object = object()
+
+        def join(self, timeout: float | None = None) -> None:
+            self.join_timeout = timeout
+
+    backend = DummyBackend()
+    reporter = ResultsReporter(dsn="https://example.test/ingest", backend=backend)
+    dummy_queue = DummyQueue()
+    dummy_thread = DummyThread()
+    reporter._upload_queue = dummy_queue  # type: ignore
+    reporter._uploader = dummy_thread  # type: ignore
+
+    reporter.report_end()
+
+    assert dummy_queue.calls == [("put", None)]
+    assert dummy_thread.join_timeout is None
