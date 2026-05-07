@@ -15,14 +15,21 @@ class HttpReportingBackend(ReportingBackend):
         self.url = url
         self.headers = headers or {}
 
-    def record_event(self, event: dict) -> None:
-        requests.post(
+    def record_event(self, event: dict) -> dict[str, Any] | None:
+        response = requests.post(
             self.url,
             json=event,
             headers=self.headers,
             verify=False,
             allow_redirects=True,
         )
+        try:
+            response_json = response.json()
+        except (AttributeError, ValueError):
+            return None
+        if not isinstance(response_json, dict):
+            return None
+        return response_json
 
     def request_upload_link(self, filename: str) -> dict | None:
         upload_url = f"{self.url.rstrip('/')}/attachment/upload-link/"

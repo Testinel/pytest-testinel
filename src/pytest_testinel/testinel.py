@@ -6,6 +6,7 @@ from os import PathLike
 from dataclasses import asdict
 from itertools import dropwhile
 from typing import Any, Generator
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pytest
 from _pytest._code.code import ExceptionChainRepr
@@ -17,6 +18,10 @@ from .noop_reporting_backend import NoopReportingBackend
 _test_reporter: ResultsReporter | None = None
 
 logger = logging.getLogger("testinel")
+RUN_WEB_URL_UTM_PARAMS = {
+    "utm_source": "pytest-testinel",
+    "utm_medium": "cli",
+}
 
 
 def _get_test_reporter() -> ResultsReporter:
@@ -31,6 +36,41 @@ def _get_test_reporter() -> ResultsReporter:
         else:
             _test_reporter = ResultsReporter(dsn=dsn)
     return _test_reporter
+
+
+def _add_run_web_url_utm_params(run_web_url: str) -> str:
+    parsed_url = urlsplit(run_web_url)
+    query_params = [
+        (key, value)
+        for key, value in parse_qsl(parsed_url.query, keep_blank_values=True)
+        if key not in RUN_WEB_URL_UTM_PARAMS
+    ]
+    query_params.extend(RUN_WEB_URL_UTM_PARAMS.items())
+
+    return urlunsplit(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            urlencode(query_params),
+            parsed_url.fragment,
+        )
+    )
+
+
+def _write_run_web_url(config: pytest.Config, run_web_url: str, phase: str) -> None:
+    run_web_url = _add_run_web_url_utm_params(run_web_url)
+    if phase == "start":
+        message = f"Testinel: watch this test run at {run_web_url}"
+    else:
+        message = f"Testinel: test run finished. View it at {run_web_url}"
+
+    terminal_reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if terminal_reporter is not None:
+        terminal_reporter.write_line(message)
+        return
+
+    print(message, file=sys.stderr)
 
 
 def _safe_path(value: object) -> str:
@@ -155,7 +195,7 @@ def pytest_runtest_makereport(
 @pytest.fixture(scope="session", autouse=True)
 def reporter(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     config = request.config
-    _get_test_reporter().report_start(
+    run_web_url = _get_test_reporter().report_start(
         payload={
             "args": config.args,
             "options": vars(config.option),
@@ -164,11 +204,15 @@ def reporter(request: pytest.FixtureRequest) -> Generator[None, None, None]:
             },
         }
     )
+    if run_web_url:
+        _write_run_web_url(config, run_web_url, "start")
     yield
 
 
-def pytest_sessionfinish(session, exitstatus):
-    _get_test_reporter().report_end()
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    run_web_url = _get_test_reporter().report_end()
+    if run_web_url:
+        _write_run_web_url(session.config, run_web_url, "end")
     logger.info("Testinel completed.")
 
 
