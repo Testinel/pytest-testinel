@@ -52,8 +52,22 @@ def test_results_reporter_http_backend_posts_events(
 ) -> None:
     calls: list[dict] = []
 
-    def fake_post(url: str, json: dict, headers: dict, verify: bool) -> None:
-        calls.append({"url": url, "json": json, "headers": headers, "verify": verify})
+    def fake_post(
+        url: str,
+        json: dict,
+        headers: dict,
+        verify: bool,
+        allow_redirects: bool,
+    ) -> None:
+        calls.append(
+            {
+                "url": url,
+                "json": json,
+                "headers": headers,
+                "verify": verify,
+                "allow_redirects": allow_redirects,
+            }
+        )
 
     monkeypatch.setattr(http_reporting_backend.requests, "post", fake_post)
 
@@ -67,6 +81,7 @@ def test_results_reporter_http_backend_posts_events(
     assert calls[0]["headers"]["User-Agent"].startswith("testinel.pytest/")
     assert calls[0]["headers"]["X-Testinel-Client"].startswith("testinel.pytest/")
     assert calls[0]["verify"] is False
+    assert calls[0]["allow_redirects"] is True
 
 
 def test_results_reporter_file_backend_writes_json(tmp_path: Path) -> None:

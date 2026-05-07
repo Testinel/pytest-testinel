@@ -11,12 +11,18 @@ logger = logging.getLogger("testinel")
 class HttpReportingBackend(ReportingBackend):
     url: str
 
-    def __init__(self, url: str, headers: dict[str, str] | None = None):
+    def __init__(self, url: str, headers: dict[str, str] | None = None) -> None:
         self.url = url
         self.headers = headers or {}
 
     def record_event(self, event: dict) -> None:
-        requests.post(self.url, json=event, headers=self.headers, verify=False)
+        requests.post(
+            self.url,
+            json=event,
+            headers=self.headers,
+            verify=False,
+            allow_redirects=True,
+        )
 
     def request_upload_link(self, filename: str) -> dict | None:
         upload_url = f"{self.url.rstrip('/')}/attachment/upload-link/"
