@@ -4,7 +4,7 @@ from typing import Any
 
 class ReportingBackend(abc.ABC):
     @abc.abstractmethod
-    def record_event(self, event: dict) -> None: ...
+    def record_event(self, event: dict) -> dict[str, Any] | None: ...
 
     def on_start(self) -> None:
         return

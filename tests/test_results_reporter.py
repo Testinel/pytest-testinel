@@ -16,9 +16,13 @@ class DummyBackend(reporting_backend.ReportingBackend):
         self.events: list[dict] = []
         self.started = False
         self.ended = False
+        self.responses: list[dict | None] = []
 
-    def record_event(self, event: dict) -> None:
+    def record_event(self, event: dict) -> dict | None:
         self.events.append(event)
+        if self.responses:
+            return self.responses.pop(0)
+        return None
 
     def on_start(self) -> None:
         self.started = True
@@ -45,6 +49,52 @@ def test_results_reporter_uses_explicit_backend() -> None:
     assert backend.events[1]["event"] == "end"
     assert "sdk" not in backend.events[1]
     assert backend.events[0]["run_id"] == backend.events[1]["run_id"]
+
+
+def test_results_reporter_captures_run_web_url_from_start_response() -> None:
+    backend = DummyBackend()
+    backend.responses.append(
+        {
+            "test_run_id": "run-uuid",
+            "run_web_url": "https://host/projects/project-slug/runs/run-uuid/",
+        }
+    )
+    reporter = ResultsReporter(dsn="https://example.test/ingest", backend=backend)
+
+    run_web_url = reporter.report_start(payload={})
+
+    assert run_web_url == "https://host/projects/project-slug/runs/run-uuid/"
+    assert reporter.run_web_url == "https://host/projects/project-slug/runs/run-uuid/"
+
+
+def test_results_reporter_ignores_start_response_without_run_web_url() -> None:
+    backend = DummyBackend()
+    backend.responses.append({"test_run_id": "run-uuid"})
+    reporter = ResultsReporter(dsn="https://example.test/ingest", backend=backend)
+
+    run_web_url = reporter.report_start(payload={})
+
+    assert run_web_url is None
+    assert reporter.run_web_url is None
+
+
+def test_results_reporter_reuses_start_run_web_url_on_end() -> None:
+    backend = DummyBackend()
+    backend.responses.extend(
+        [
+            {
+                "test_run_id": "run-uuid",
+                "run_web_url": "https://host/projects/project-slug/runs/run-uuid/",
+            },
+            None,
+        ]
+    )
+    reporter = ResultsReporter(dsn="https://example.test/ingest", backend=backend)
+    reporter.report_start(payload={})
+
+    run_web_url = reporter.report_end()
+
+    assert run_web_url == "https://host/projects/project-slug/runs/run-uuid/"
 
 
 def test_results_reporter_http_backend_posts_events(

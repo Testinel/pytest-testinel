@@ -42,6 +42,7 @@ def _build_http_headers() -> dict[str, str]:
 
 class ResultsReporter:
     run_id: str
+    run_web_url: str | None
     dsn: str
     backend: ReportingBackend
     tests: list[dict]
@@ -49,6 +50,7 @@ class ResultsReporter:
     def __init__(self, dsn: str, backend: ReportingBackend | None = None):
         self.dsn = dsn
         self.run_id = str(uuid.uuid4())
+        self.run_web_url = None
         self.tests = []
         self.attachments: list[str] = []
         self._upload_queue: queue.Queue = queue.Queue()
@@ -81,10 +83,19 @@ class ResultsReporter:
             "Use https://... or file:///path/to/file."
         )
 
-    def report_start(self, payload: dict) -> None:
+    def _capture_run_web_url(self, response: dict | None) -> str | None:
+        if not isinstance(response, dict):
+            return None
+        run_web_url = response.get("run_web_url")
+        if not isinstance(run_web_url, str) or not run_web_url:
+            return None
+        self.run_web_url = run_web_url
+        return run_web_url
+
+    def report_start(self, payload: dict) -> str | None:
         self.backend.on_start()
         sdk_info = _build_sdk_info()
-        self.backend.record_event(
+        response = self.backend.record_event(
             {
                 "run_id": self.run_id,
                 "event": "start",
@@ -95,11 +106,12 @@ class ResultsReporter:
             }
         )
         logger.info(f"Reporting started. Testinel info: {sdk_info}")
+        return self._capture_run_web_url(response)
 
-    def report_end(self) -> None:
+    def report_end(self) -> str | None:
         self._upload_queue.put(None)
         self._uploader.join()
-        self.backend.record_event(
+        response = self.backend.record_event(
             {
                 "run_id": self.run_id,
                 "event": "end",
@@ -108,9 +120,10 @@ class ResultsReporter:
         )
         self.backend.on_end()
         logger.info("Reporting ended.")
+        return self._capture_run_web_url(response) or self.run_web_url
 
     def report_event(self, event: str, payload: dict) -> None:
-        self.backend.record_event(
+        response = self.backend.record_event(
             {
                 "run_id": self.run_id,
                 "event": event,
@@ -119,6 +132,7 @@ class ResultsReporter:
                 "screenshots": self.attachments,
             }
         )
+        self._capture_run_web_url(response)
         self.attachments = []
         logger.info(f"Event '{event}' reported.")
 

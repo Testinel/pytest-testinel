@@ -13,8 +13,9 @@ class FileReportingBackend(ReportingBackend):
         self.filename = filename
         self.indent = indent
 
-    def record_event(self, event: dict) -> None:
+    def record_event(self, event: dict) -> dict | None:
         self.events.append(event)
+        return None
 
     def on_end(self) -> None:
         with open(self.filename, "w", encoding="utf-8") as f:
