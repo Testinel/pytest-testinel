@@ -5,7 +5,7 @@ Testinel’s pytest plugin captures structured test execution data directly from
 ## 📦 Getting Started
 ### Prerequisites
 
-You need a Testinel [account](https://testinel.first.institute/accounts/signup/?next=/projects/) and [project](https://testinel.first.institute/projects/).
+You need a Testinel [account](https://testinel.dev/accounts/signup/?next=/projects/) and [project](https://testinel.dev/projects/).
 
 ### Installation
 
