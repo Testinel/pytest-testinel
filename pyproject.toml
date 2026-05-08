@@ -22,7 +22,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 
 [project.urls]
-Homepage = "https://testinel.first.institute"
+Homepage = "https://testinel.dev"
 Repository = "https://github.com/Testinel/pytest-testinel"
 Issues = "https://github.com/Testinel/pytest-testinel/issues"
 
