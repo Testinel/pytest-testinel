@@ -20,7 +20,6 @@ class HttpReportingBackend(ReportingBackend):
             self.url,
             json=event,
             headers=self.headers,
-            verify=False,
             allow_redirects=True,
         )
         try:
@@ -37,7 +36,6 @@ class HttpReportingBackend(ReportingBackend):
             upload_url,
             json={"filename": filename},
             headers=self.headers,
-            verify=False,
         )
         response.raise_for_status()
         return response.json()

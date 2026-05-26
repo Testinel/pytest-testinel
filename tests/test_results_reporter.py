@@ -106,7 +106,6 @@ def test_results_reporter_http_backend_posts_events(
         url: str,
         json: dict,
         headers: dict,
-        verify: bool,
         allow_redirects: bool,
     ) -> None:
         calls.append(
@@ -114,7 +113,6 @@ def test_results_reporter_http_backend_posts_events(
                 "url": url,
                 "json": json,
                 "headers": headers,
-                "verify": verify,
                 "allow_redirects": allow_redirects,
             }
         )
@@ -130,7 +128,6 @@ def test_results_reporter_http_backend_posts_events(
     assert "sdk" not in calls[0]["json"]
     assert calls[0]["headers"]["User-Agent"].startswith("testinel.pytest/")
     assert calls[0]["headers"]["X-Testinel-Client"].startswith("testinel.pytest/")
-    assert calls[0]["verify"] is False
     assert calls[0]["allow_redirects"] is True
 
 
