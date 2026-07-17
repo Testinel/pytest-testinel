@@ -1,3 +1,7 @@
+import logging
+
+import pytest
+
 from pytest_testinel import testinel
 
 
@@ -22,6 +26,22 @@ class DummyPluginManager:
 class DummyConfig:
     def __init__(self, terminal_reporter: DummyTerminalReporter) -> None:
         self.pluginmanager = DummyPluginManager(terminal_reporter)
+
+
+def test_plugin_uses_pytest_native_logging(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger="pytest_testinel")
+
+    testinel.logger.info("native logging")
+
+    assert caplog.record_tuples == [
+        ("pytest_testinel.testinel", logging.INFO, "native logging")
+    ]
+    assert testinel.logger.handlers == []
+    assert testinel.logger.propagate is True
+
+
+def test_plugin_does_not_register_custom_log_level_option() -> None:
+    assert not hasattr(testinel, "pytest_addoption")
 
 
 def test_write_run_web_url_outputs_start_message() -> None:

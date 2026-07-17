@@ -1,4 +1,8 @@
-import os, queue, threading, uuid, logging
+import logging
+import os
+import queue
+import threading
+import uuid
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from urllib.parse import unquote, urlparse
@@ -13,7 +17,57 @@ SDK_NAME = "testinel.pytest"
 PACKAGE_NAME = "pytest-testinel"
 UNKNOWN_VERSION = "unknown"
 
-logger = logging.getLogger("testinel")
+logger = logging.getLogger(__name__)
+
+REQUEST_ID_HEADERS = ("X-Request-ID", "Request-ID", "X-Correlation-ID")
+
+
+def _response_metadata(
+    response: Response | None,
+) -> tuple[object, object, object, object]:
+    if response is None:
+        return None, None, None, None
+
+    request_id = next(
+        (
+            response.headers[name]
+            for name in REQUEST_ID_HEADERS
+            if name in response.headers
+        ),
+        None,
+    )
+    return (
+        response.status_code,
+        response.reason,
+        len(response.content or b""),
+        request_id,
+    )
+
+
+def _log_failure(
+    level: int,
+    message: str,
+    exc: Exception,
+    filename: str | None = None,
+    event: str | None = None,
+) -> None:
+    response = getattr(exc, "response", None)
+    if not isinstance(response, Response):
+        response = None
+    status, reason, response_size, request_id = _response_metadata(response)
+    logger.log(
+        level,
+        "%s error_type=%s status=%r reason=%r response_size=%r request_id=%r "
+        "filename=%r event=%r",
+        message,
+        type(exc).__name__,
+        status,
+        reason,
+        response_size,
+        request_id,
+        os.path.basename(filename) if filename else None,
+        event,
+    )
 
 
 def _get_sdk_version() -> str:
@@ -93,55 +147,93 @@ class ResultsReporter:
         return run_web_url
 
     def report_start(self, payload: dict) -> str | None:
-        self.backend.on_start()
-        sdk_info = _build_sdk_info()
-        response = self.backend.record_event(
-            {
-                "run_id": self.run_id,
-                "event": "start",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "sdk": sdk_info,
-                "payload": payload,
-                "tests": self.tests,
-            }
-        )
-        logger.info(f"Reporting started. Testinel info: {sdk_info}")
+        try:
+            self.backend.on_start()
+            sdk_info = _build_sdk_info()
+            response = self.backend.record_event(
+                {
+                    "run_id": self.run_id,
+                    "event": "start",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "sdk": sdk_info,
+                    "payload": payload,
+                    "tests": self.tests,
+                }
+            )
+        except Exception as exc:
+            _log_failure(logging.WARNING, "Reporting start failed.", exc)
+            return None
+        logger.info("Reporting started. Testinel info: %s", sdk_info)
         return self._capture_run_web_url(response)
 
     def report_end(self) -> str | None:
-        self._upload_queue.put(None)
-        self._uploader.join()
-        response = self.backend.record_event(
-            {
-                "run_id": self.run_id,
-                "event": "end",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        self.backend.on_end()
-        logger.info("Reporting ended.")
+        response = None
+        failed = False
+        try:
+            self._upload_queue.put(None)
+            self._uploader.join()
+        except Exception as exc:
+            failed = True
+            _log_failure(logging.WARNING, "Stopping attachment uploader failed.", exc)
+
+        try:
+            response = self.backend.record_event(
+                {
+                    "run_id": self.run_id,
+                    "event": "end",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        except Exception as exc:
+            failed = True
+            _log_failure(logging.WARNING, "Reporting end event failed.", exc)
+        finally:
+            try:
+                self.backend.on_end()
+            except Exception as exc:
+                failed = True
+                _log_failure(logging.WARNING, "Reporting backend cleanup failed.", exc)
+
+        if not failed:
+            logger.info("Reporting ended.")
         return self._capture_run_web_url(response) or self.run_web_url
 
     def report_event(self, event: str, payload: dict) -> None:
-        response = self.backend.record_event(
-            {
-                "run_id": self.run_id,
-                "event": event,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "payload": payload,
-                "screenshots": self.attachments,
-            }
-        )
+        try:
+            response = self.backend.record_event(
+                {
+                    "run_id": self.run_id,
+                    "event": event,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "payload": payload,
+                    "screenshots": self.attachments,
+                }
+            )
+        except Exception as exc:
+            _log_failure(
+                logging.WARNING,
+                "Reporting event failed.",
+                exc,
+                event=event,
+            )
+            return
         self._capture_run_web_url(response)
         self.attachments = []
-        logger.info(f"Event '{event}' reported.")
+        logger.debug("Event %r reported.", event)
 
     def report_attachment(self, filename: str) -> None:
         upload_info = None
         try:
             upload_info = self.backend.request_upload_link(filename)
+            if upload_info is not None and not isinstance(upload_info, dict):
+                raise ValueError("Upload-link response must be a dictionary.")
         except Exception as exc:
-            logger.exception(f"Requesting upload link failed for '{filename}'.")
+            _log_failure(
+                logging.WARNING,
+                "Requesting attachment upload link failed.",
+                exc,
+                filename,
+            )
             upload_info = None
 
         if not upload_info:
@@ -158,18 +250,21 @@ class ResultsReporter:
         method = upload_info.get("method", "PUT")
         headers = upload_info.get("headers", {})
         self._upload_queue.put((upload_url, method, headers, filename))
-        logger.info(f"Attachment '{filename}' put to the uploading queue.")
+        logger.debug(
+            "Attachment %r put in the upload queue.", os.path.basename(filename)
+        )
 
     def _upload_loop(self) -> None:
-        logger.info("Upload loop started.")
+        logger.debug("Upload loop started.")
         while True:
             item = self._upload_queue.get()
             if item is None:
                 self._upload_queue.task_done()
-                logger.info("Received 'None'. Upload loop exited.")
+                logger.debug("Upload loop stopped.")
                 return
             upload_url, method, headers, filename = item
-            logger.info(f"Received upload task: '{filename}'.")
+            safe_filename = os.path.basename(filename)
+            logger.debug("Received upload task for %r.", safe_filename)
             try:
                 resp = self.backend.upload_file(
                     upload_url=upload_url,
@@ -179,12 +274,26 @@ class ResultsReporter:
                 )
                 if isinstance(resp, Response):
                     if resp.ok:
-                        logger.info(f"File '{filename}' uploaded.")
+                        logger.debug("File %r uploaded.", safe_filename)
                     else:
-                        logger.error(
-                            f"Upload failed for '{filename}'. Status: {resp.status_code}, content: {resp.content!r}"
+                        status, reason, response_size, request_id = _response_metadata(
+                            resp
                         )
-            except Exception:
-                logger.exception(f"Upload for '{filename}' failed.")
+                        logger.error(
+                            "Upload failed. status=%r reason=%r response_size=%r "
+                            "request_id=%r filename=%r",
+                            status,
+                            reason,
+                            response_size,
+                            request_id,
+                            safe_filename,
+                        )
+            except Exception as exc:
+                _log_failure(
+                    logging.ERROR,
+                    "Attachment upload failed.",
+                    exc,
+                    filename,
+                )
             finally:
                 self._upload_queue.task_done()

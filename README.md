@@ -1,6 +1,6 @@
 ## Official Testinel plugin for pytest
 
-Testinel’s pytest plugin captures structured test execution data directly from pytest and sends it to Testinel, where your test results become searchable, comparable, and actually useful. No log scraping. No brittle CI hacks. Just deterministic test analytics.
+Testinel’s pytest plugin captures structured Selenium and Playwright test execution data directly from pytest and sends it to Testinel, where your test results become searchable, comparable, and actually useful. No log scraping. No brittle CI hacks. Just deterministic test analytics.
 
 ## 📦 Getting Started
 ### Prerequisites
@@ -15,42 +15,64 @@ Getting Testinel into your project is straightforward. Just run this command in 
 pip install --upgrade pytest-testinel
 ```
 
+Or with `uv`:
+
+```
+uv add pytest-testinel
+```
+
 ### Configuration
 
-Set Testinel reporter DSN environment variable `TESTINEL_DSN`.
+Set Testinel reporter DSN environment variable `TESTINEL_DSN`. Get DSN for your project at [https://testinel.dev/projects/](https://testinel.dev/projects/).
 
 Examples:
 
 ```
 # Report to Testinel (HTTPS)
-export TESTINEL_DSN="https://your.testinel.endpoint/ingest"
+export TESTINEL_DSN="https://your.testinel.endpoint/ingest/xxxxxxxxxxxx/"
 ```
 
 ```
 # Report to a local file (JSON)
 export TESTINEL_DSN="file:///tmp/testinel-results.json"
-```
 
-```
 # Or use a direct file path
 export TESTINEL_DSN="./testinel-results.json"
 ```
 
-Set Testinel plugin log level with `--testinel-log-level`.
+### Logging
 
-Supported values:
+Testinel uses pytest's standard logging controls.
 
-- `DEBUG`
-- `INFO`
-- `WARNING` (default)
-- `ERROR`
-- `CRITICAL`
-
-Example:
+To set the logging level to `INFO` for all pytest loggers and show the messages
+live, run:
 
 ```bash
-pytest --testinel-log-level=INFO
+pytest --log-level=INFO --log-cli-level=INFO
 ```
+
+To change the level for pytest-testinel only, set its parent logger in your
+project's `conftest.py`:
+
+```python
+import logging
+
+
+def pytest_configure() -> None:
+    logging.getLogger("pytest_testinel").setLevel(logging.INFO)
+```
+
+To also show these messages live, enable pytest's live logging:
+
+```bash
+pytest -o log_cli=true
+```
+
+Other loggers keep their existing levels. Replace `INFO` with `DEBUG`,
+`WARNING`, or another standard Python logging level as needed.
+
+Use pytest's `--log-file`, `--log-format`, and related options to control log
+storage and formatting.
 
 ### Recommended pytest flags
 

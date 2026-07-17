@@ -572,7 +572,7 @@ wheels = [
 
 [[package]]
 name = "pytest-testinel"
-version = "0.8.3"
+version = "0.8.4"
 source = { editable = "." }
 dependencies = [
     { name = "pytest" },

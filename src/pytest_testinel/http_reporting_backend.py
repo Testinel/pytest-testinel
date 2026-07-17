@@ -1,11 +1,11 @@
-import logging
 from typing import Any
 
 import requests
 
 from pytest_testinel.reporting_backend import ReportingBackend
 
-logger = logging.getLogger("testinel")
+EVENT_TIMEOUT = (5, 30)
+UPLOAD_TIMEOUT = (5, 60)
 
 
 class HttpReportingBackend(ReportingBackend):
@@ -21,7 +21,9 @@ class HttpReportingBackend(ReportingBackend):
             json=event,
             headers=self.headers,
             allow_redirects=True,
+            timeout=EVENT_TIMEOUT,
         )
+        response.raise_for_status()
         try:
             response_json = response.json()
         except (AttributeError, ValueError):
@@ -36,6 +38,7 @@ class HttpReportingBackend(ReportingBackend):
             upload_url,
             json={"filename": filename},
             headers=self.headers,
+            timeout=EVENT_TIMEOUT,
         )
         response.raise_for_status()
         return response.json()
@@ -48,4 +51,10 @@ class HttpReportingBackend(ReportingBackend):
         filename: str,
     ) -> Any | None:
         with open(filename, "rb") as f:
-            return requests.request(method, upload_url, data=f, headers=headers)
+            return requests.request(
+                method,
+                upload_url,
+                data=f,
+                headers=headers,
+                timeout=UPLOAD_TIMEOUT,
+            )

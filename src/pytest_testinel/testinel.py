@@ -17,7 +17,7 @@ from .noop_reporting_backend import NoopReportingBackend
 
 _test_reporter: ResultsReporter | None = None
 
-logger = logging.getLogger("testinel")
+logger = logging.getLogger(__name__)
 RUN_WEB_URL_UTM_PARAMS = {
     "utm_source": "pytest-testinel",
     "utm_medium": "cli",
@@ -149,7 +149,7 @@ def pytest_runtest_makereport(
 
         tb_frames = traceback.extract_tb(call.excinfo.value.__traceback__)
         filtered_frames = dropwhile(
-            lambda t: not item.location[0] in t.filename, tb_frames
+            lambda t: item.location[0] not in t.filename, tb_frames
         )
         ss = traceback.StackSummary.from_list(filtered_frames)
 
@@ -219,34 +219,6 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 def pytest_collection_finish(session: pytest.Session) -> None:
     tests = [to_test_dict(item) for item in session.items]
     _get_test_reporter().tests = tests
-
-
-def pytest_addoption(parser):
-    group = parser.getgroup("testinel")
-    group.addoption(
-        "--testinel-log-level",
-        action="store",
-        default="WARNING",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help="Log level for Testinel plugin",
-    )
-
-
-def pytest_configure(config):
-    level_name = config.getoption("--testinel-log-level")
-    level = getattr(logging, level_name, logging.WARNING)
-
-    logger.setLevel(level)
-
-    if not logger.handlers:
-        handler = logging.StreamHandler(sys.stderr)
-        formatter = logging.Formatter(
-            "[%(asctime)s] %(levelname)s %(name)s [%(threadName)s] %(message)s"
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-
-    logger.propagate = False
 
 
 _patch_selenium_save_screenshot()
