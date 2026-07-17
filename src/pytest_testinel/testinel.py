@@ -5,17 +5,19 @@ import traceback
 from os import PathLike
 from dataclasses import asdict
 from itertools import dropwhile
-from typing import Any, Generator
+from typing import Any, Generator, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pytest
 from _pytest._code.code import ExceptionChainRepr
+from _pytest.terminal import TerminalReporter
 
 from .env_vars import ENV_VAR_WHITELIST
 from .results_reporter import ResultsReporter
 from .noop_reporting_backend import NoopReportingBackend
 
 _test_reporter: ResultsReporter | None = None
+_final_run_web_url: str | None = None
 
 logger = logging.getLogger(__name__)
 RUN_WEB_URL_UTM_PARAMS = {
@@ -58,18 +60,29 @@ def _add_run_web_url_utm_params(run_web_url: str) -> str:
     )
 
 
+def _get_terminal_reporter(config: pytest.Config) -> TerminalReporter | None:
+    terminal_reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if terminal_reporter is None:
+        return None
+    return cast(TerminalReporter, terminal_reporter)
+
+
 def _write_run_web_url(config: pytest.Config, run_web_url: str, phase: str) -> None:
     run_web_url = _add_run_web_url_utm_params(run_web_url)
     if phase == "start":
-        message = f"Testinel: watch this test run at {run_web_url}"
+        title = "Testinel live run"
+        message = f"View live report: {run_web_url}"
     else:
-        message = f"Testinel: test run finished. View it at {run_web_url}"
+        title = "Testinel report"
+        message = f"View run report: {run_web_url}"
 
-    terminal_reporter = config.pluginmanager.get_plugin("terminalreporter")
+    terminal_reporter = _get_terminal_reporter(config)
     if terminal_reporter is not None:
+        terminal_reporter.write_sep("=", title)
         terminal_reporter.write_line(message)
         return
 
+    print(f"=== {title} ===", file=sys.stderr)
     print(message, file=sys.stderr)
 
 
@@ -192,10 +205,12 @@ def pytest_runtest_makereport(
     )
 
 
-@pytest.fixture(scope="session", autouse=True)
-def reporter(request: pytest.FixtureRequest) -> Generator[None, None, None]:
-    config = request.config
-    run_web_url = _get_test_reporter().report_start(
+@pytest.hookimpl(trylast=True)
+def pytest_collection_finish(session: pytest.Session) -> None:
+    config = session.config
+    test_reporter = _get_test_reporter()
+    test_reporter.tests = [to_test_dict(item) for item in session.items]
+    run_web_url = test_reporter.report_start(
         payload={
             "args": config.args,
             "options": vars(config.option),
@@ -206,19 +221,43 @@ def reporter(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     )
     if run_web_url:
         _write_run_web_url(config, run_web_url, "start")
-    yield
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    run_web_url = _get_test_reporter().report_end()
-    if run_web_url:
-        _write_run_web_url(session.config, run_web_url, "end")
+    global _final_run_web_url
+
+    _final_run_web_url = _get_test_reporter().report_end()
+    terminal_reporter = _get_terminal_reporter(session.config)
+    terminal_summary_expected = (
+        terminal_reporter is not None
+        and not terminal_reporter.no_summary
+        and exitstatus
+        in {
+            pytest.ExitCode.OK,
+            pytest.ExitCode.TESTS_FAILED,
+            pytest.ExitCode.INTERRUPTED,
+            pytest.ExitCode.USAGE_ERROR,
+            pytest.ExitCode.NO_TESTS_COLLECTED,
+        }
+    )
+    if _final_run_web_url and not terminal_summary_expected:
+        _write_run_web_url(session.config, _final_run_web_url, "end")
+        _final_run_web_url = None
     logger.info("Testinel completed.")
 
 
-def pytest_collection_finish(session: pytest.Session) -> None:
-    tests = [to_test_dict(item) for item in session.items]
-    _get_test_reporter().tests = tests
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_terminal_summary(
+    config: pytest.Config,
+) -> Generator[None, Any, None]:
+    try:
+        yield
+    finally:
+        global _final_run_web_url
+
+        if _final_run_web_url:
+            _write_run_web_url(config, _final_run_web_url, "end")
+            _final_run_web_url = None
 
 
 _patch_selenium_save_screenshot()

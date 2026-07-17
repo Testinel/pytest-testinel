@@ -82,6 +82,20 @@ def test_results_reporter_ignores_start_response_without_run_web_url() -> None:
     assert reporter.run_web_url is None
 
 
+@pytest.mark.parametrize("run_web_url", [None, "", 123, [], {}])
+def test_results_reporter_ignores_invalid_run_web_url_values(
+    run_web_url: object,
+) -> None:
+    backend = DummyBackend()
+    backend.responses.append({"run_web_url": run_web_url})
+    reporter = ResultsReporter(dsn="https://example.test/ingest", backend=backend)
+
+    captured_url = reporter.report_start(payload={})
+
+    assert captured_url is None
+    assert reporter.run_web_url is None
+
+
 def test_results_reporter_reuses_start_run_web_url_on_end() -> None:
     backend = DummyBackend()
     backend.responses.extend(
