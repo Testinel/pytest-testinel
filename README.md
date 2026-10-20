@@ -7,6 +7,8 @@ Testinel’s pytest plugin captures structured Selenium and Playwright test exec
 
 You need a Testinel [account](https://testinel.dev/accounts/signup/?next=/projects/) and [project](https://testinel.dev/projects/).
 
+Python 3.11 through 3.16 is required.
+
 ### Installation
 
 Getting Testinel into your project is straightforward. Just run this command in your terminal:
@@ -110,3 +112,26 @@ Example:
 ```bash
 pytest --tracing=retain-on-failure --video=retain-on-failure --screenshot=only-on-failure --output=test-results
 ```
+
+## Development
+
+Run the test matrix with tox:
+
+```bash
+uv run tox
+```
+
+The matrix covers Python 3.11 through 3.16 against the latest available release
+in each pytest major version: 7, 8, and 9. Each environment installs the package
+as a wheel. Missing Python interpreters fail the run; install them before running
+the full matrix.
+
+Run one environment, or pass arguments to pytest:
+
+```bash
+uv run tox -e py311-pytest7
+uv run tox -e py315-pytest9 -- tests/test_testinel.py -v
+```
+
+Use `uv run tox run -r` to recreate environments and resolve the latest pytest
+releases after new versions are published.
