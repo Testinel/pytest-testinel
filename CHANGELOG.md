@@ -2,6 +2,18 @@
 
 ## [0.9.0] — 2026-10-21
 
+### Upgrade
+
+Requires Python 3.11–3.16. Upgrade with either:
+
+```sh
+uv add --upgrade pytest-testinel
+```
+
+```sh
+python -m pip install --upgrade pytest-testinel
+```
+
 Changes since [0.8.5](https://github.com/Testinel/pytest-testinel/releases/tag/0.8.5).
 
 ### User-facing changes
