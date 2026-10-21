@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.9.1] — 2026-10-21
+
+### Upgrade
+
+Requires Python 3.11–3.16. Upgrade with either:
+
+```sh
+uv add --upgrade pytest-testinel
+```
+
+```sh
+python -m pip install --upgrade pytest-testinel
+```
+
+Changes since [0.9.0](https://github.com/Testinel/pytest-testinel/releases/tag/0.9.0).
+
+### Security and dependency updates
+
+- Update the locked `certifi` dependency from 2026.6.17 to 2026.10.19. This is a
+  lockfile update; the package's runtime dependency requirements remain
+  `pytest>=7` and `requests>=2`, so installing the published plugin does not
+  enforce this exact transitive dependency version.
+
 ## [0.9.0] — 2026-10-21
 
 ### Upgrade
@@ -85,4 +108,5 @@ Changes since [0.8.5](https://github.com/Testinel/pytest-testinel/releases/tag/0
 - Document the testing plan and require comments explaining compatibility
   workarounds and their affected runtime or dependency versions.
 
+[0.9.1]: https://github.com/Testinel/pytest-testinel/compare/0.9.0...0.9.1
 [0.9.0]: https://github.com/Testinel/pytest-testinel/compare/0.8.5...0.9.0
