@@ -139,7 +139,10 @@ def _patch_selenium_save_screenshot() -> None:
     WebDriver.save_screenshot = patched
 
 
-def serialize_repr(long_repr: ExceptionChainRepr) -> dict:
+def serialize_repr(long_repr: ExceptionChainRepr | str) -> dict[str, Any]:
+    # Pytest 7–9 represent strict XPASS failures as strings.
+    if isinstance(long_repr, str):
+        return {"message": long_repr}
     return asdict(long_repr)
 
 
@@ -169,22 +172,21 @@ def pytest_runtest_makereport(
     exc_info = None
     repr_info = None
     if report.outcome == "failed":
-        # driver = item.funcargs["driver"]
-        # logs = driver.get_log('browser')
-        # current_url = driver.current_url
-        exc = call.excinfo.value
+        # Pytest 7–9 mark strict XPASS as failed without attaching an exception.
+        if call.excinfo is not None:
+            exc = call.excinfo.value
 
-        tb_frames = traceback.extract_tb(call.excinfo.value.__traceback__)
-        filtered_frames = dropwhile(
-            lambda t: item.location[0] not in t.filename, tb_frames
-        )
-        ss = traceback.StackSummary.from_list(filtered_frames)
+            tb_frames = traceback.extract_tb(exc.__traceback__)
+            filtered_frames = dropwhile(
+                lambda t: item.location[0] not in t.filename, tb_frames
+            )
+            ss = traceback.StackSummary.from_list(filtered_frames)
 
-        exc_info = {
-            "type": f"{exc.__class__.__module__}.{exc.__class__.__name__}",
-            "message": str(exc),
-            "notes": list(getattr(exc, "__notes__", []) or []),
-        }
+            exc_info = {
+                "type": f"{exc.__class__.__module__}.{exc.__class__.__name__}",
+                "message": str(exc),
+                "notes": list(getattr(exc, "__notes__", []) or []),
+            }
 
         repr_info = serialize_repr(report.longrepr)
 
