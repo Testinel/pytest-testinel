@@ -62,6 +62,7 @@ dev = [
 
 [tool.poe.tasks]
 test = "pytest"
+tox = "tox run -q -- -q"
 check = ["lint", "test"]
 
 [tool.poe.tasks.lint]
