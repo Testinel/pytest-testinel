@@ -1,10 +1,12 @@
 import logging
+import json
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from pytest_testinel import testinel
+from pytest_testinel.results_reporter import INGEST_NOT_FOUND_WARNING, ResultsReporter
 
 
 class DummyTerminalReporter:
@@ -32,6 +34,7 @@ class DummyPluginManager:
 class DummyConfig:
     def __init__(self, terminal_reporter: DummyTerminalReporter | None) -> None:
         self.pluginmanager = DummyPluginManager(terminal_reporter)
+        self.stash = pytest.Stash()
         self.args = ["tests"]
         self.option = SimpleNamespace(no_summary=False)
 
@@ -40,6 +43,7 @@ class DummyResultsReporter:
     def __init__(self, run_web_url: str | None) -> None:
         self.tests: list[dict[str, Any]] = []
         self.run_web_url = run_web_url
+        self.disabled_reason: str | None = None
         self.start_payload: dict[str, Any] | None = None
         self.end_calls = 0
 
@@ -245,3 +249,112 @@ def test_add_run_web_url_utm_params_replaces_existing_utm_values() -> None:
         run_web_url == "https://host/projects/project-slug/runs/run-uuid/"
         "?tab=failed&utm_source=pytest-testinel&utm_medium=cli"
     )
+
+
+@pytest.mark.parametrize("has_terminal", [True, False])
+def test_reporting_warning_is_shown_once_per_session(
+    capsys: pytest.CaptureFixture[str], has_terminal: bool
+) -> None:
+    terminal_reporter = DummyTerminalReporter() if has_terminal else None
+    config = DummyConfig(terminal_reporter)
+    reporter = DummyResultsReporter(None)
+    reporter.disabled_reason = INGEST_NOT_FOUND_WARNING
+
+    for _ in range(3):
+        testinel._write_reporting_warning(
+            cast(pytest.Config, config), cast(ResultsReporter, reporter)
+        )
+
+    message = f"WARNING: {INGEST_NOT_FOUND_WARNING}"
+    if terminal_reporter is not None:
+        assert terminal_reporter.lines == [message]
+        assert capsys.readouterr().err == ""
+    else:
+        assert capsys.readouterr().err == f"{message}\n"
+
+    next_config = DummyConfig(terminal_reporter)
+    testinel._write_reporting_warning(
+        cast(pytest.Config, next_config), cast(ResultsReporter, reporter)
+    )
+    if terminal_reporter is not None:
+        assert terminal_reporter.lines == [message, message]
+    else:
+        assert capsys.readouterr().err == f"{message}\n"
+
+
+@pytest.mark.parametrize(
+    ("rejected_event", "test_passes", "has_terminal", "expected_events"),
+    [
+        ("start", True, True, ["start"]),
+        ("start", False, True, ["start"]),
+        ("setup", True, True, ["start", "setup"]),
+        ("call", False, True, ["start", "setup", "call"]),
+        ("end", True, True, ["start", "setup", "call", "teardown", "end"]),
+        ("start", True, False, ["start"]),
+    ],
+)
+def test_ingest_404_warning_in_real_pytest_session(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    rejected_event: str,
+    test_passes: bool,
+    has_terminal: bool,
+    expected_events: list[str],
+) -> None:
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv(
+        "TESTINEL_DSN", "https://secret.example.test/ingest/private-dsn/"
+    )
+    pytester.makeconftest(
+        """
+import json as json_module
+from pathlib import Path
+from typing import Any
+
+import requests
+from requests import Response
+
+events: list[str] = []
+
+def post(url: str, *, json: dict, **kwargs: Any) -> Response:
+    events.append(json["event"])
+    Path("events.json").write_text(json_module.dumps(events))
+    response = Response()
+    response.status_code = 404 if json["event"] == REJECTED_EVENT else 200
+    response.url = url
+    response.reason = "private reason"
+    response._content = b'{"run_web_url": "https://host/run/", "detail": "private body"}'
+    return response
+
+def pytest_configure() -> None:
+    requests.post = post
+""".replace("REJECTED_EVENT", repr(rejected_event))
+    )
+    pytester.makepyfile(f"def test_example() -> None:\n    assert {test_passes!r}\n")
+    args = [
+        "-p",
+        "pytest_testinel.testinel",
+        "--log-file=reporting.log",
+        "--log-file-level=WARNING",
+        "--log-level=CRITICAL",
+    ]
+    if not has_terminal:
+        args.extend(["-p", "no:terminal"])
+
+    result = pytester.runpytest_subprocess(*args)
+
+    assert result.ret == (
+        pytest.ExitCode.OK if test_passes else pytest.ExitCode.TESTS_FAILED
+    )
+    output = result.stdout.str() if has_terminal else result.stderr.str()
+    assert output.count(f"WARNING: {INGEST_NOT_FOUND_WARNING}") == 1
+    assert "View run report:" not in output
+    assert "private-dsn" not in output
+    assert "private reason" not in output
+    assert "private body" not in output
+    assert "secret.example.test" not in output
+    logs = (pytester.path / "reporting.log").read_text()
+    assert logs.count(INGEST_NOT_FOUND_WARNING) == 1
+    assert "private" not in logs
+    assert "secret.example.test" not in logs
+    assert json.loads((pytester.path / "events.json").read_text()) == expected_events

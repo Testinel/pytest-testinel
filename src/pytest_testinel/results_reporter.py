@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from urllib.parse import unquote, urlparse
 
-from requests import Response
+from requests import HTTPError, Response
 
 from pytest_testinel.file_reporting_backend import FileReportingBackend
 from pytest_testinel.http_reporting_backend import HttpReportingBackend
@@ -20,6 +20,11 @@ UNKNOWN_VERSION = "unknown"
 logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADERS = ("X-Request-ID", "Request-ID", "X-Correlation-ID")
+INGEST_NOT_FOUND_WARNING = (
+    "Testinel reporting disabled for the rest of this run: ingest endpoint returned "
+    "HTTP 404. Check TESTINEL_DSN and project availability at "
+    "https://testinel.dev/projects/. Tests will continue normally."
+)
 
 
 def _response_metadata(
@@ -101,12 +106,13 @@ class ResultsReporter:
     backend: ReportingBackend
     tests: list[dict]
 
-    def __init__(self, dsn: str, backend: ReportingBackend | None = None):
+    def __init__(self, dsn: str, backend: ReportingBackend | None = None) -> None:
         self.dsn = dsn
         self.run_id = str(uuid.uuid4())
         self.run_web_url = None
         self.tests = []
         self.attachments: list[str] = []
+        self._reporting_disabled = threading.Event()
         self._upload_queue: queue.Queue = queue.Queue()
         self._uploader: threading.Thread = threading.Thread(
             target=self._upload_loop,
@@ -146,11 +152,33 @@ class ResultsReporter:
         self.run_web_url = run_web_url
         return run_web_url
 
+    @property
+    def disabled_reason(self) -> str | None:
+        if self._reporting_disabled.is_set():
+            return INGEST_NOT_FOUND_WARNING
+        return None
+
+    def _record_event(self, event: dict) -> dict | None:
+        if self._reporting_disabled.is_set():
+            return None
+        try:
+            return self.backend.record_event(event)
+        except HTTPError as exc:
+            response = exc.response
+            if response is None or response.status_code != 404:
+                raise
+            self._reporting_disabled.set()
+            self.attachments.clear()
+            logger.warning(INGEST_NOT_FOUND_WARNING)
+            return None
+
     def report_start(self, payload: dict) -> str | None:
+        if self._reporting_disabled.is_set():
+            return None
         try:
             self.backend.on_start()
             sdk_info = _build_sdk_info()
-            response = self.backend.record_event(
+            response = self._record_event(
                 {
                     "run_id": self.run_id,
                     "event": "start",
@@ -162,6 +190,8 @@ class ResultsReporter:
             )
         except Exception as exc:
             _log_failure(logging.WARNING, "Reporting start failed.", exc)
+            return None
+        if self._reporting_disabled.is_set():
             return None
         logger.info("Reporting started. Testinel info: %s", sdk_info)
         return self._capture_run_web_url(response)
@@ -177,7 +207,7 @@ class ResultsReporter:
             _log_failure(logging.WARNING, "Stopping attachment uploader failed.", exc)
 
         try:
-            response = self.backend.record_event(
+            response = self._record_event(
                 {
                     "run_id": self.run_id,
                     "event": "end",
@@ -194,13 +224,17 @@ class ResultsReporter:
                 failed = True
                 _log_failure(logging.WARNING, "Reporting backend cleanup failed.", exc)
 
+        if self._reporting_disabled.is_set():
+            return None
         if not failed:
             logger.info("Reporting ended.")
         return self._capture_run_web_url(response) or self.run_web_url
 
     def report_event(self, event: str, payload: dict) -> None:
+        if self._reporting_disabled.is_set():
+            return
         try:
-            response = self.backend.record_event(
+            response = self._record_event(
                 {
                     "run_id": self.run_id,
                     "event": event,
@@ -217,11 +251,15 @@ class ResultsReporter:
                 event=event,
             )
             return
+        if self._reporting_disabled.is_set():
+            return
         self._capture_run_web_url(response)
         self.attachments = []
         logger.debug("Event %r reported.", event)
 
     def report_attachment(self, filename: str) -> None:
+        if self._reporting_disabled.is_set():
+            return
         upload_info = None
         try:
             upload_info = self.backend.request_upload_link(filename)
@@ -266,6 +304,8 @@ class ResultsReporter:
             safe_filename = os.path.basename(filename)
             logger.debug("Received upload task for %r.", safe_filename)
             try:
+                if self._reporting_disabled.is_set():
+                    continue
                 resp = self.backend.upload_file(
                     upload_url=upload_url,
                     method=method,

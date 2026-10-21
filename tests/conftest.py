@@ -1,6 +1,8 @@
 import pytest
 from typing import Generator
 
+pytest_plugins = ["pytester"]
+
 
 @pytest.fixture(autouse=True, scope="session")
 def testinel_dsn() -> Generator[None, None, None]:

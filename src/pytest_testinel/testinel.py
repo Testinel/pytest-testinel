@@ -18,6 +18,7 @@ from .noop_reporting_backend import NoopReportingBackend
 
 _test_reporter: ResultsReporter | None = None
 _final_run_web_url: str | None = None
+_reporting_warning_shown_key = pytest.StashKey[bool]()
 
 logger = logging.getLogger(__name__)
 RUN_WEB_URL_UTM_PARAMS = {
@@ -84,6 +85,19 @@ def _write_run_web_url(config: pytest.Config, run_web_url: str, phase: str) -> N
 
     print(f"=== {title} ===", file=sys.stderr)
     print(message, file=sys.stderr)
+
+
+def _write_reporting_warning(config: pytest.Config, reporter: ResultsReporter) -> None:
+    reason = reporter.disabled_reason
+    if reason is None or config.stash.get(_reporting_warning_shown_key, False):
+        return
+    config.stash[_reporting_warning_shown_key] = True
+    message = f"WARNING: {reason}"
+    terminal_reporter = _get_terminal_reporter(config)
+    if terminal_reporter is not None:
+        terminal_reporter.write_line(message)
+    else:
+        print(message, file=sys.stderr)
 
 
 def _safe_path(value: object) -> str:
@@ -180,7 +194,8 @@ def pytest_runtest_makereport(
             for filename in filenames:
                 _get_test_reporter().report_attachment(os.path.join(dirpath, filename))
 
-    _get_test_reporter().report_event(
+    test_reporter = _get_test_reporter()
+    test_reporter.report_event(
         event=report.when,
         payload={
             "test": to_test_dict(item),
@@ -203,6 +218,7 @@ def pytest_runtest_makereport(
             else None,
         },
     )
+    _write_reporting_warning(item.config, test_reporter)
 
 
 @pytest.hookimpl(trylast=True)
@@ -219,6 +235,7 @@ def pytest_collection_finish(session: pytest.Session) -> None:
             },
         }
     )
+    _write_reporting_warning(config, test_reporter)
     if run_web_url:
         _write_run_web_url(config, run_web_url, "start")
 
@@ -226,7 +243,9 @@ def pytest_collection_finish(session: pytest.Session) -> None:
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     global _final_run_web_url
 
-    _final_run_web_url = _get_test_reporter().report_end()
+    test_reporter = _get_test_reporter()
+    _final_run_web_url = test_reporter.report_end()
+    _write_reporting_warning(session.config, test_reporter)
     terminal_reporter = _get_terminal_reporter(session.config)
     terminal_summary_expected = (
         terminal_reporter is not None

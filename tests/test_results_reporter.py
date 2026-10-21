@@ -1,6 +1,8 @@
 import json
 import logging
+import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 import requests
@@ -8,6 +10,7 @@ from requests import Response
 
 from pytest_testinel import http_reporting_backend, reporting_backend
 from pytest_testinel.results_reporter import (
+    INGEST_NOT_FOUND_WARNING,
     ResultsReporter,
 )
 from pytest_testinel.file_reporting_backend import FileReportingBackend
@@ -435,3 +438,184 @@ def test_malformed_upload_link_response_is_best_effort(
     assert "Requesting attachment upload link failed" in caplog.text
     assert "screenshot.png" in caplog.text
     assert "/private/path" not in caplog.text
+
+
+def http_response(status: int, payload: dict | None = None) -> Response:
+    response = Response()
+    response.status_code = status
+    response.url = "https://secret.example.test/ingest/private-dsn/"
+    response.reason = "private reason"
+    response._content = json.dumps(payload or {"detail": "private body"}).encode()
+    return response
+
+
+@pytest.mark.parametrize(
+    ("rejected_event", "expected_events"),
+    [
+        ("start", ["start"]),
+        ("call", ["start", "call"]),
+        ("end", ["start", "call", "end"]),
+    ],
+)
+def test_ingest_404_disables_reporter_and_still_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    rejected_event: str,
+    expected_events: list[str],
+) -> None:
+    events: list[str] = []
+    cleanup_calls: list[None] = []
+
+    def post(url: str, *, json: dict, **kwargs: Any) -> Response:
+        events.append(json["event"])
+        return http_response(
+            404 if json["event"] == rejected_event else 200,
+            {"run_web_url": "https://host/run/"},
+        )
+
+    monkeypatch.setattr(http_reporting_backend.requests, "post", post)
+    reporter = ResultsReporter("https://secret.example.test/ingest/private-dsn/")
+    monkeypatch.setattr(reporter.backend, "on_end", lambda: cleanup_calls.append(None))
+    caplog.set_level(logging.DEBUG, logger="pytest_testinel")
+
+    reporter.report_start({})
+    reporter.report_event("call", {})
+    if rejected_event != "end":
+        reporter.report_attachment("not-opened.png")
+    final_url = reporter.report_end()
+    reporter.report_start({})
+    reporter.report_event("teardown", {})
+    reporter.report_attachment("not-opened-either.png")
+
+    assert events == expected_events
+    assert final_url is None
+    assert reporter.disabled_reason == INGEST_NOT_FOUND_WARNING
+    assert reporter.attachments == []
+    assert cleanup_calls == [None]
+    assert not reporter._uploader.is_alive()
+    assert reporter._upload_queue.unfinished_tasks == 0
+    warnings = [
+        record for record in caplog.records if record.levelno >= logging.WARNING
+    ]
+    assert [record.getMessage() for record in warnings] == [INGEST_NOT_FOUND_WARNING]
+    assert "https://testinel.dev/projects/" in caplog.text
+    assert "private" not in caplog.text
+    assert "secret.example.test" not in caplog.text
+    assert "Reporting ended." not in caplog.text
+    assert f"Event '{rejected_event}' reported." not in caplog.text
+
+
+def test_disabled_reporter_discards_queued_uploads_after_inflight_upload_finishes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    upload_started = threading.Event()
+    release_upload = threading.Event()
+    uploaded: list[str] = []
+    attachment = tmp_path / "screenshot.png"
+    attachment.write_bytes(b"image")
+
+    def post(url: str, **kwargs: Any) -> Response:
+        if url.endswith("attachment/upload-link/"):
+            return http_response(200, {"upload_url": "https://storage.example.test/"})
+        return http_response(404)
+
+    def upload(method: str, url: str, **kwargs: Any) -> Response:
+        uploaded.append(url)
+        upload_started.set()
+        if not release_upload.wait(timeout=5):
+            raise TimeoutError("Test did not release upload")
+        return http_response(200)
+
+    monkeypatch.setattr(http_reporting_backend.requests, "post", post)
+    monkeypatch.setattr(http_reporting_backend.requests, "request", upload)
+    reporter = ResultsReporter("https://example.test/ingest/")
+    try:
+        reporter.report_attachment(str(attachment))
+        assert upload_started.wait(timeout=5)
+        reporter.report_attachment(str(attachment))
+        reporter.report_attachment(str(attachment))
+        reporter.report_event("call", {})
+        reporter.report_attachment(str(attachment))
+    finally:
+        release_upload.set()
+        reporter.report_end()
+
+    assert uploaded == ["https://storage.example.test/"]
+    assert reporter.attachments == []
+    assert not reporter._uploader.is_alive()
+    assert reporter._upload_queue.unfinished_tasks == 0
+
+
+@pytest.mark.parametrize("failure_source", ["upload-link", "storage"])
+def test_attachment_404_does_not_disable_reporting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure_source: str
+) -> None:
+    events: list[str] = []
+    uploads: list[str] = []
+    attachment = tmp_path / "screenshot.png"
+    attachment.write_bytes(b"image")
+
+    def post(url: str, *, json: dict, **kwargs: Any) -> Response:
+        if url.endswith("attachment/upload-link/"):
+            return http_response(
+                404 if failure_source == "upload-link" else 200,
+                {"upload_url": "https://storage.example.test/"},
+            )
+        events.append(json["event"])
+        return http_response(200)
+
+    def upload(method: str, url: str, **kwargs: Any) -> Response:
+        uploads.append(url)
+        return http_response(404)
+
+    monkeypatch.setattr(http_reporting_backend.requests, "post", post)
+    monkeypatch.setattr(http_reporting_backend.requests, "request", upload)
+    reporter = ResultsReporter("https://example.test/ingest/")
+    reporter.report_start({})
+    reporter.report_attachment(str(attachment))
+    reporter.report_event("call", {})
+    reporter.report_end()
+
+    assert reporter.disabled_reason is None
+    assert events == ["start", "call", "end"]
+    assert len(uploads) == (1 if failure_source == "storage" else 0)
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 429, 500, 503, None])
+def test_other_ingest_errors_do_not_disable_reporting(
+    monkeypatch: pytest.MonkeyPatch, status: int | None
+) -> None:
+    events: list[str] = []
+
+    def post(url: str, *, json: dict, **kwargs: Any) -> Response:
+        events.append(json["event"])
+        if status is None:
+            raise requests.HTTPError("No response")
+        return http_response(status)
+
+    monkeypatch.setattr(http_reporting_backend.requests, "post", post)
+    reporter = ResultsReporter("https://example.test/ingest/")
+    reporter.report_start({})
+    reporter.report_event("call", {})
+    reporter.report_end()
+
+    assert reporter.disabled_reason is None
+    assert events == ["start", "call", "end"]
+
+
+def test_new_reporter_tries_again_after_another_reporter_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = iter([http_response(404), http_response(200), http_response(200)])
+    monkeypatch.setattr(
+        http_reporting_backend.requests, "post", lambda *a, **k: next(responses)
+    )
+    first = ResultsReporter("https://example.test/ingest/")
+    first.report_start({})
+    first.report_end()
+    second = ResultsReporter("https://example.test/ingest/")
+    second.report_start({})
+    second.report_end()
+
+    assert first.disabled_reason == INGEST_NOT_FOUND_WARNING
+    assert second.disabled_reason is None

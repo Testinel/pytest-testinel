@@ -46,6 +46,15 @@ export TESTINEL_DSN="./testinel-results.json"
 
 Testinel uses pytest's standard logging controls.
 
+If an event submission returns HTTP 404, Testinel disables reporting for the rest
+of the run and emits one terminal warning and one `WARNING` log record. Check
+`TESTINEL_DSN` and your project at [https://testinel.dev/projects/](https://testinel.dev/projects/).
+Tests continue normally with their usual exit status. No further events or new
+attachments are sent; queued uploads are discarded, while an upload already in
+progress may finish. A fresh pytest process tries reporting again. Other request
+failures, including attachment-link or storage-upload 404s, keep their existing
+best-effort behavior.
+
 To set the logging level to `INFO` for all pytest loggers and show the messages
 live, run:
 
