@@ -3,6 +3,7 @@ import logging
 import threading
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import pytest
 import requests
@@ -215,6 +216,10 @@ def test_results_reporter_file_backend_writes_json(tmp_path: Path) -> None:
     assert data[0]["event"] == "start"
     assert data[1]["event"] == "end"
     assert data[0]["run_id"] == data[1]["run_id"]
+    assert data[0]["event_id"] != data[1]["event_id"]
+    for event in data:
+        assert UUID(event["event_id"]).version == 4
+        assert "request_id" not in event
 
 
 def test_results_reporter_plain_path_uses_file_backend(tmp_path: Path) -> None:

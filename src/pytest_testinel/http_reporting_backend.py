@@ -1,4 +1,6 @@
+import logging
 from typing import Any
+from uuid import uuid4
 
 import requests
 
@@ -6,6 +8,8 @@ from pytest_testinel.reporting_backend import ReportingBackend
 
 EVENT_TIMEOUT = (5, 30)
 UPLOAD_TIMEOUT = (5, 60)
+
+logger = logging.getLogger(__name__)
 
 
 class HttpReportingBackend(ReportingBackend):
@@ -15,15 +19,25 @@ class HttpReportingBackend(ReportingBackend):
         self.url = url
         self.headers = headers or {}
 
-    def record_event(self, event: dict) -> dict[str, Any] | None:
+    def _post_json(self, url: str, payload: dict) -> requests.Response:
+        request_id = str(uuid4())
+        logger.debug(
+            "Sending Testinel request. request_id=%s event_id=%s",
+            request_id,
+            payload.get("event_id"),
+        )
         response = requests.post(
-            self.url,
-            json=event,
-            headers=self.headers,
+            url,
+            json={**payload, "request_id": request_id},
+            headers={**self.headers, "X-Request-ID": request_id},
             allow_redirects=True,
             timeout=EVENT_TIMEOUT,
         )
         response.raise_for_status()
+        return response
+
+    def record_event(self, event: dict) -> dict[str, Any] | None:
+        response = self._post_json(self.url, event)
         try:
             response_json = response.json()
         except (AttributeError, ValueError):
@@ -34,13 +48,7 @@ class HttpReportingBackend(ReportingBackend):
 
     def request_upload_link(self, filename: str) -> dict | None:
         upload_url = f"{self.url.rstrip('/')}/attachment/upload-link/"
-        response = requests.post(
-            upload_url,
-            json={"filename": filename},
-            headers=self.headers,
-            timeout=EVENT_TIMEOUT,
-        )
-        response.raise_for_status()
+        response = self._post_json(upload_url, {"filename": filename})
         return response.json()
 
     def upload_file(

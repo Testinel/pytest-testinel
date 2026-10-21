@@ -161,6 +161,7 @@ class ResultsReporter:
     def _record_event(self, event: dict) -> dict | None:
         if self._reporting_disabled.is_set():
             return None
+        event["event_id"] = str(uuid.uuid4())
         try:
             return self.backend.record_event(event)
         except HTTPError as exc:

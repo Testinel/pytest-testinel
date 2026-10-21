@@ -46,6 +46,13 @@ export TESTINEL_DSN="./testinel-results.json"
 
 Testinel uses pytest's standard logging controls.
 
+Each reported event has a UUID `event_id` in its JSON body, including events
+written to a local file. Each HTTP event submission and upload-link request
+gets a fresh UUID `request_id`, sent in both the `X-Request-ID` header and the
+JSON body. Sending the same event again preserves its `event_id` and generates
+a new `request_id`. The IDs are logged at `DEBUG` before sending the request.
+Signed binary uploads retain the headers supplied by the storage provider.
+
 If an event submission returns HTTP 404, Testinel disables reporting for the rest
 of the run and emits one terminal warning and one `WARNING` log record. Check
 `TESTINEL_DSN` and your project at [https://testinel.dev/projects/](https://testinel.dev/projects/).
