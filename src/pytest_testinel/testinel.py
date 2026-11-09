@@ -1,11 +1,11 @@
-import os
 import logging
+import os
 import sys
 import traceback
-from os import PathLike
-from dataclasses import asdict
+from collections.abc import Generator
 from itertools import dropwhile
-from typing import Any, Generator, cast
+from os import PathLike
+from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pytest
@@ -13,8 +13,9 @@ from _pytest._code.code import ExceptionChainRepr
 from _pytest.terminal import TerminalReporter
 
 from .env_vars import ENV_VAR_WHITELIST
-from .results_reporter import ResultsReporter
 from .noop_reporting_backend import NoopReportingBackend
+from .report_diagnostics import from_report, report_representation
+from .results_reporter import ResultsReporter
 
 _test_reporter: ResultsReporter | None = None
 _final_run_web_url: str | None = None
@@ -111,15 +112,19 @@ def _safe_path(value: object) -> str:
     if isinstance(path, bytes):
         try:
             return path.decode()
-        except Exception:
+        except UnicodeDecodeError:
             return str(path)
     return path
 
 
 def _patch_selenium_save_screenshot() -> None:
     try:
-        from selenium.webdriver.remote.webdriver import WebDriver  # type: ignore[import-not-found]
-    except Exception:
+        # Selenium is optional and need not be installed in the plugin environment.
+        # ty: ignore[import-not-found]
+        from selenium.webdriver.remote.webdriver import (  # type: ignore[import-not-found]
+            WebDriver,
+        )
+    except ImportError:
         return
 
     original = getattr(WebDriver, "save_screenshot", None)
@@ -130,12 +135,11 @@ def _patch_selenium_save_screenshot() -> None:
         result = original(self, filename, *args, **kwargs)
         try:
             _get_test_reporter().report_attachment(_safe_path(filename))
-        except Exception:
+        except Exception:  # noqa: BLE001 -- Reporting failures must preserve Selenium's screenshot result.
             return result
         return result
 
-    setattr(patched, "_testinel_patched", True)
-    setattr(patched, "_testinel_original", original)
+    patched.__dict__.update(_testinel_patched=True, _testinel_original=original)
     WebDriver.save_screenshot = patched
 
 
@@ -143,7 +147,7 @@ def serialize_repr(long_repr: ExceptionChainRepr | str) -> dict[str, Any]:
     # Pytest 7–9 represent strict XPASS failures as strings.
     if isinstance(long_repr, str):
         return {"message": long_repr}
-    return asdict(long_repr)
+    return report_representation(long_repr)
 
 
 def to_test_dict(item: Any) -> dict[str, Any]:
@@ -167,28 +171,27 @@ def pytest_runtest_makereport(
     outcome = yield
     report = outcome.get_result()
 
-    report.exception = None
-    ss = None
-    exc_info = None
-    repr_info = None
+    test_reporter = _get_test_reporter()
+    diagnostic = None
     if report.outcome == "failed":
-        # Pytest 7–9 mark strict XPASS as failed without attaching an exception.
-        if call.excinfo is not None:
-            exc = call.excinfo.value
-
-            tb_frames = traceback.extract_tb(exc.__traceback__)
-            filtered_frames = dropwhile(
-                lambda t: item.location[0] not in t.filename, tb_frames
-            )
-            ss = traceback.StackSummary.from_list(filtered_frames)
-
-            exc_info = {
-                "type": f"{exc.__class__.__module__}.{exc.__class__.__name__}",
-                "message": str(exc),
-                "notes": list(getattr(exc, "__notes__", []) or []),
-            }
-
-        repr_info = serialize_repr(report.longrepr)
+        exc = call.excinfo.value if call.excinfo is not None else None
+        frames = traceback.extract_tb(exc.__traceback__) if exc is not None else []
+        filtered = dropwhile(lambda t: item.location[0] not in t.filename, frames)
+        diagnostic = from_report(
+            report.longrepr,
+            exc,
+            [
+                {
+                    "filename": f.filename,
+                    "lineno": f.lineno,
+                    "name": f.name,
+                    "line": f.line,
+                }
+                for f in filtered
+            ],
+            value_limit=test_reporter.limits.value,
+            frame_limit=test_reporter.limits.frame,
+        )
 
     if output_path := item.funcargs.get("output_path"):
         # Probably, it is Playwright traces
@@ -203,21 +206,7 @@ def pytest_runtest_makereport(
             "test": to_test_dict(item),
             "outcome": report.outcome,
             "duration": report.duration,
-            "error_info": {
-                "repr_info": repr_info,
-                "traceback": [
-                    {
-                        "filename": f.filename,
-                        "lineno": f.lineno,
-                        "name": f.name,
-                        "line": f.line,
-                    }
-                    for f in (ss or [])
-                ],
-                "exception": exc_info,
-            }
-            if report.outcome == "failed"
-            else None,
+            "error_info": diagnostic,
         },
     )
     _write_reporting_warning(item.config, test_reporter)

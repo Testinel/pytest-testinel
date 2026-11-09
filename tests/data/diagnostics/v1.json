@@ -1,0 +1,83 @@
+{
+  "exception": {
+    "type": "builtins.RuntimeError",
+    "message": "newest",
+    "notes": [
+      "note"
+    ]
+  },
+  "repr_info": {
+    "reprtraceback": {
+      "reprentries": [
+        {
+          "lines": [
+            "> raise RuntimeError()"
+          ],
+          "reprfileloc": {
+            "path": "tests/test_a.py",
+            "lineno": 42
+          },
+          "reprlocals": {
+            "lines": [
+              "body = 'value'"
+            ]
+          },
+          "reprfuncargs": null
+        }
+      ]
+    },
+    "reprcrash": {
+      "path": "tests/test_a.py",
+      "lineno": 42,
+      "message": "RuntimeError: newest"
+    },
+    "chain": [
+      [
+        {
+          "reprentries": [
+            {
+              "lines": [
+                "> raise ValueError()"
+              ],
+              "reprfileloc": {
+                "path": "tests/test_a.py",
+                "lineno": 40
+              }
+            }
+          ]
+        },
+        {
+          "message": "builtins.ValueError: earlier"
+        },
+        "The above exception was the direct cause of the following exception:"
+      ],
+      [
+        {
+          "reprentries": [
+            {
+              "lines": [
+                "> raise RuntimeError()"
+              ],
+              "reprfileloc": {
+                "path": "tests/test_a.py",
+                "lineno": 42
+              },
+              "reprlocals": {
+                "lines": [
+                  "body = 'value'"
+                ]
+              },
+              "reprfuncargs": null
+            }
+          ]
+        },
+        {
+          "path": "tests/test_a.py",
+          "lineno": 42,
+          "message": "RuntimeError: newest"
+        },
+        null
+      ]
+    ]
+  }
+}

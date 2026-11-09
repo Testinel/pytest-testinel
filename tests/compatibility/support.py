@@ -6,7 +6,6 @@ from typing import Any
 
 import pytest
 
-
 RUN_URL = "https://dashboard.example.test/runs/compatibility/"
 
 TRANSPORT_CONFTEST = """

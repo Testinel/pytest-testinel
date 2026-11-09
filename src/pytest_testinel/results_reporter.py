@@ -3,14 +3,17 @@ import os
 import queue
 import threading
 import uuid
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from urllib.parse import unquote, urlparse
 
 from requests import HTTPError, Response
 
+from pytest_testinel.diagnostics import ReportingValidationError
 from pytest_testinel.file_reporting_backend import FileReportingBackend
 from pytest_testinel.http_reporting_backend import HttpReportingBackend
+from pytest_testinel.payload import Limits, bound_event, negotiate
 from pytest_testinel.reporting_backend import ReportingBackend
 
 SDK_NAME = "testinel.pytest"
@@ -106,7 +109,18 @@ class ResultsReporter:
     backend: ReportingBackend
     tests: list[dict]
 
-    def __init__(self, dsn: str, backend: ReportingBackend | None = None) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        backend: ReportingBackend | None = None,
+        *,
+        diagnostic_schema_version: int = 1,
+    ) -> None:
+        if diagnostic_schema_version not in (1, 2):
+            raise ValueError("Unsupported diagnostic schema version")
+        self.limits = Limits.from_environment()
+        self.diagnostic_schema_version = diagnostic_schema_version
+        self._disabled_message: str | None = None
         self.dsn = dsn
         self.run_id = str(uuid.uuid4())
         self.run_web_url = None
@@ -128,7 +142,9 @@ class ResultsReporter:
     def _backend_from_dsn(self, dsn: str) -> ReportingBackend:
         parsed = urlparse(dsn)
         if parsed.scheme in {"http", "https"}:
-            return HttpReportingBackend(url=dsn, headers=_build_http_headers())
+            return HttpReportingBackend(
+                url=dsn, headers=_build_http_headers(), limits=self.limits
+            )
         if parsed.scheme == "file":
             if parsed.netloc:
                 raise ValueError(
@@ -155,7 +171,7 @@ class ResultsReporter:
     @property
     def disabled_reason(self) -> str | None:
         if self._reporting_disabled.is_set():
-            return INGEST_NOT_FOUND_WARNING
+            return self._disabled_message or INGEST_NOT_FOUND_WARNING
         return None
 
     def _record_event(self, event: dict) -> dict | None:
@@ -163,7 +179,21 @@ class ResultsReporter:
             return None
         event["event_id"] = str(uuid.uuid4())
         try:
-            return self.backend.record_event(event)
+            if isinstance(self.backend, HttpReportingBackend):
+                self.backend.limits = self.limits
+                self.backend.diagnostic_schema_version = self.diagnostic_schema_version
+                return self.backend.record_event(event)
+            bounded, _ = bound_event(event, self.limits, self.diagnostic_schema_version)
+            return self.backend.record_event(bounded)
+        except ReportingValidationError as exc:
+            if event.get("event") == "start":
+                self._disabled_message = "Testinel reporting disabled for this run: complete inventory cannot be reported within the configured size/identity limits. Tests will continue normally."
+                self._reporting_disabled.set()
+                self.attachments.clear()
+            if event.get("event") != "start":
+                raise
+            logger.warning("%s", exc)
+            return None
         except HTTPError as exc:
             response = exc.response
             if response is None or response.status_code != 404:
@@ -183,17 +213,21 @@ class ResultsReporter:
                 {
                     "run_id": self.run_id,
                     "event": "start",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "sdk": sdk_info,
                     "payload": payload,
                     "tests": self.tests,
                 }
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- Backend failures must not interrupt pytest.
             _log_failure(logging.WARNING, "Reporting start failed.", exc)
             return None
         if self._reporting_disabled.is_set():
             return None
+        negotiated, event_limit = negotiate(response, self.limits.event)
+        if isinstance(self.backend, HttpReportingBackend) or response is not None:
+            self.diagnostic_schema_version = negotiated
+        self.limits = replace(self.limits, event=event_limit)
         logger.info("Reporting started. Testinel info: %s", sdk_info)
         return self._capture_run_web_url(response)
 
@@ -203,7 +237,7 @@ class ResultsReporter:
         try:
             self._upload_queue.put(None)
             self._uploader.join()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- Uploader shutdown must not prevent backend cleanup.
             failed = True
             _log_failure(logging.WARNING, "Stopping attachment uploader failed.", exc)
 
@@ -212,16 +246,16 @@ class ResultsReporter:
                 {
                     "run_id": self.run_id,
                     "event": "end",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- Event delivery failures must not interrupt pytest.
             failed = True
             _log_failure(logging.WARNING, "Reporting end event failed.", exc)
         finally:
             try:
                 self.backend.on_end()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- Backend cleanup failures must not interrupt pytest.
                 failed = True
                 _log_failure(logging.WARNING, "Reporting backend cleanup failed.", exc)
 
@@ -239,12 +273,15 @@ class ResultsReporter:
                 {
                     "run_id": self.run_id,
                     "event": event,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "payload": payload,
                     "screenshots": self.attachments,
                 }
             )
-        except Exception as exc:
+        except ReportingValidationError as exc:
+            logger.warning("%s", exc)
+            return
+        except Exception as exc:  # noqa: BLE001 -- Event delivery failures must not interrupt pytest.
             _log_failure(
                 logging.WARNING,
                 "Reporting event failed.",
@@ -266,7 +303,7 @@ class ResultsReporter:
             upload_info = self.backend.request_upload_link(filename)
             if upload_info is not None and not isinstance(upload_info, dict):
                 raise ValueError("Upload-link response must be a dictionary.")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- Attachment reporting is best effort for any backend.
             _log_failure(
                 logging.WARNING,
                 "Requesting attachment upload link failed.",
@@ -329,7 +366,7 @@ class ResultsReporter:
                             request_id,
                             safe_filename,
                         )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- Failed uploads must not stop processing queued attachments.
                 _log_failure(
                     logging.ERROR,
                     "Attachment upload failed.",

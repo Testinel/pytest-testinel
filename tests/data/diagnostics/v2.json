@@ -1,0 +1,65 @@
+{
+  "schema_version": 2,
+  "exception": {
+    "type": "builtins.RuntimeError",
+    "message": "newest",
+    "notes": [
+      "note"
+    ]
+  },
+  "frames": [
+    {
+      "path": "tests/test_a.py",
+      "line": 42,
+      "function": null,
+      "start_line": 42,
+      "source": [
+        "> raise RuntimeError()"
+      ],
+      "args": [],
+      "locals": [
+        {
+          "name": "body",
+          "value": "'value'"
+        }
+      ]
+    }
+  ],
+  "causes": [
+    {
+      "exception": {
+        "type": "builtins.ValueError",
+        "message": "earlier",
+        "notes": []
+      },
+      "frames": [
+        {
+          "path": "tests/test_a.py",
+          "line": 40,
+          "function": null,
+          "start_line": 40,
+          "source": [
+            "> raise ValueError()"
+          ],
+          "args": [],
+          "locals": []
+        }
+      ],
+      "relationship": "direct_cause"
+    }
+  ],
+  "details": [],
+  "text": null,
+  "captures": [],
+  "reduction": {
+    "policy_version": 1,
+    "truncated_values": 0,
+    "omitted_frames": 0,
+    "omitted_causes": 0,
+    "omitted_entries": 0,
+    "locals_omitted": false,
+    "arguments_omitted": false,
+    "details_omitted": false,
+    "metadata_omitted": false
+  }
+}

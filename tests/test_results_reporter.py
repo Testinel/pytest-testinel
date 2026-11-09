@@ -10,13 +10,16 @@ import requests
 from requests import Response
 
 from pytest_testinel import http_reporting_backend, reporting_backend
+from pytest_testinel.file_reporting_backend import FileReportingBackend
+from pytest_testinel.http_reporting_backend import (
+    EVENT_TIMEOUT,
+    UPLOAD_TIMEOUT,
+    HttpReportingBackend,
+)
 from pytest_testinel.results_reporter import (
     INGEST_NOT_FOUND_WARNING,
     ResultsReporter,
 )
-from pytest_testinel.file_reporting_backend import FileReportingBackend
-from pytest_testinel.http_reporting_backend import HttpReportingBackend
-from pytest_testinel.http_reporting_backend import EVENT_TIMEOUT, UPLOAD_TIMEOUT
 
 
 class DummyBackend(reporting_backend.ReportingBackend):
@@ -126,7 +129,7 @@ def test_results_reporter_http_backend_posts_events(
 
     def fake_post(
         url: str,
-        json: dict,
+        data: bytes,
         headers: dict,
         allow_redirects: bool,
         timeout: tuple[int, int],
@@ -134,7 +137,7 @@ def test_results_reporter_http_backend_posts_events(
         calls.append(
             {
                 "url": url,
-                "json": json,
+                "json": json.loads(data),
                 "headers": headers,
                 "allow_redirects": allow_redirects,
                 "timeout": timeout,
@@ -431,6 +434,8 @@ def test_malformed_upload_link_response_is_best_effort(
 ) -> None:
     class MalformedBackend(DummyBackend):
         def request_upload_link(self, filename: str) -> dict | None:
+            # Deliberately violate the backend contract to exercise runtime validation.
+            # ty: ignore[invalid-return-type]
             return ["unexpected"]  # type: ignore[return-value]
 
     reporter = ResultsReporter("unused", backend=MalformedBackend())
@@ -471,7 +476,8 @@ def test_ingest_404_disables_reporter_and_still_cleans_up(
     events: list[str] = []
     cleanup_calls: list[None] = []
 
-    def post(url: str, *, json: dict, **kwargs: Any) -> Response:
+    def post(url: str, *, data: bytes, **kwargs: Any) -> Response:
+        json = __import__("json").loads(data)
         events.append(json["event"])
         return http_response(
             404 if json["event"] == rejected_event else 200,
@@ -560,7 +566,8 @@ def test_attachment_404_does_not_disable_reporting(
     attachment = tmp_path / "screenshot.png"
     attachment.write_bytes(b"image")
 
-    def post(url: str, *, json: dict, **kwargs: Any) -> Response:
+    def post(url: str, *, data: bytes, **kwargs: Any) -> Response:
+        json = __import__("json").loads(data)
         if url.endswith("attachment/upload-link/"):
             return http_response(
                 404 if failure_source == "upload-link" else 200,
@@ -592,7 +599,8 @@ def test_other_ingest_errors_do_not_disable_reporting(
 ) -> None:
     events: list[str] = []
 
-    def post(url: str, *, json: dict, **kwargs: Any) -> Response:
+    def post(url: str, *, data: bytes, **kwargs: Any) -> Response:
+        json = __import__("json").loads(data)
         events.append(json["event"])
         if status is None:
             raise requests.HTTPError("No response")

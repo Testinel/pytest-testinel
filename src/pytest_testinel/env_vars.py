@@ -1,6 +1,6 @@
-from typing import Final, Set
+from typing import Final
 
-ENV_VAR_WHITELIST: Final[Set] = {
+ENV_VAR_WHITELIST: Final[set] = {
     "CI",
     "BITBUCKET_BUILD_NUMBER",
     "BITBUCKET_COMMIT",
@@ -23,13 +23,11 @@ ENV_VAR_WHITELIST: Final[Set] = {
     "BITBUCKET_PROJECT_UUID",
     "BITBUCKET_STEP_RUN_NUMBER",
     "BITBUCKET_STEP_TRIGGERER_UUID",
-    "BITBUCKET_STEP_RUN_NUMBER",
     # GitHub actions: https://docs.github.com/en/actions/reference/workflows-and-actions/variables
     "GITHUB_ACTION",
     "GITHUB_ACTION_PATH",
     "GITHUB_ACTION_REPOSITORY",
     "GITHUB_ACTIONS",
-    "GITHUB_ACTOR",
     "GITHUB_ACTOR",
     "GITHUB_ACTOR_ID",
     "GITHUB_BASE_REF",
@@ -51,7 +49,6 @@ ENV_VAR_WHITELIST: Final[Set] = {
     "GITHUB_TRIGGERING_ACTOR",
     "GITHUB_WORKFLOW",
     "GITHUB_WORKFLOW_REF",
-    "RUNNER_ARCH",
     "RUNNER_ARCH",
     "RUNNER_DEBUG",
     "RUNNER_ENVIRONMENT",

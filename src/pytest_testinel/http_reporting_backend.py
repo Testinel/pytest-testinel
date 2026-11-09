@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import requests
 
+from pytest_testinel.payload import Limits, bound_event
 from pytest_testinel.reporting_backend import ReportingBackend
 
 EVENT_TIMEOUT = (5, 30)
@@ -15,7 +16,15 @@ logger = logging.getLogger(__name__)
 class HttpReportingBackend(ReportingBackend):
     url: str
 
-    def __init__(self, url: str, headers: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        headers: dict[str, str] | None = None,
+        *,
+        limits: Limits | None = None,
+    ) -> None:
+        self.limits = limits or Limits.from_environment()
+        self.diagnostic_schema_version = 1
         self.url = url
         self.headers = headers or {}
 
@@ -26,10 +35,19 @@ class HttpReportingBackend(ReportingBackend):
             request_id,
             payload.get("event_id"),
         )
+        _, body = bound_event(
+            {**payload, "request_id": request_id},
+            self.limits,
+            self.diagnostic_schema_version,
+        )
         response = requests.post(
             url,
-            json={**payload, "request_id": request_id},
-            headers={**self.headers, "X-Request-ID": request_id},
+            data=body,
+            headers={
+                **self.headers,
+                "Content-Type": "application/json",
+                "X-Request-ID": request_id,
+            },
             allow_redirects=True,
             timeout=EVENT_TIMEOUT,
         )
