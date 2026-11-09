@@ -170,3 +170,33 @@ def test_binary_upload_preserves_provider_headers_and_body(
     assert request.headers["Content-Length"] == "5"
     assert "X-Event-ID" not in request.headers
     assert options["timeout"] == UPLOAD_TIMEOUT
+
+
+def test_413_is_observable_without_disabling_later_events(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    events: list[str] = []
+
+    def send(
+        self: requests.Session, request: requests.PreparedRequest, **kwargs: Any
+    ) -> requests.Response:
+        kind = request_json(request)["event"]
+        events.append(kind)
+        response = requests.Response()
+        response.request = request
+        response.status_code = 413 if kind == "call" else 200
+        response._content = (
+            b"<html>private rejection body</html>" if kind == "call" else b"{}"
+        )
+        return response
+
+    monkeypatch.setattr(requests.Session, "send", send)
+    reporter = ResultsReporter("https://example.test/ingest/private-dsn/")
+    reporter.report_start({})
+    reporter.report_event("call", {"outcome": "failed"})
+    reporter.report_event("teardown", {"outcome": "passed"})
+    reporter.report_end()
+    assert reporter.disabled_reason is None
+    assert events == ["start", "call", "teardown", "end"]
+    assert "413" in caplog.text
+    assert "private" not in caplog.text

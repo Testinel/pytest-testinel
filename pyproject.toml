@@ -1,6 +1,6 @@
 [project]
 name = "pytest-testinel"
-version = "0.9.1"
+version = "0.11.0"
 description = "Testinel’s pytest plugin captures structured Selenium and Playwright test execution data directly from pytest and sends it to Testinel, where your test results become searchable, comparable, and actually useful."
 readme = "README.md"
 requires-python = ">=3.11,<3.17"
@@ -36,11 +36,7 @@ Issues = "https://github.com/Testinel/pytest-testinel/issues"
 myproject = "pytest_testinel.testinel"
 
 [build-system]
-requires = [
-    "uv_build >= 0.9.18, <0.10.0",
-    "ruff>=0.14.10",
-    "twine>=6.2.0",
-]
+requires = ["uv_build>=0.13.7,<0.14.0"]
 build-backend = "uv_build"
 
 [[tool.uv.index]]
@@ -56,6 +52,7 @@ dev = [
     "poethepoet>=0.49.0",
     "ruff>=0.15.4",
     "tox>=4",
+    "tox-uv>=1.37.7",
     "ty>=0.0.22",
     "types-requests>=2.32.4.20260107",
 ]

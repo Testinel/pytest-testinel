@@ -1,6 +1,6 @@
 import pytest
 
-from .support import PluginRunner, RUN_URL
+from .support import RUN_URL, PluginRunner
 
 
 def test_collected_test_metadata(plugin_runner: PluginRunner) -> None:

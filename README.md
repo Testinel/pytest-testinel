@@ -151,3 +151,14 @@ uv run tox -e py315-pytest9 -- tests/test_testinel.py -v
 
 Use `uv run tox run -r` to recreate environments and resolve the latest pytest
 releases after new versions are published.
+
+### Bounded diagnostics (0.10.0)
+
+Reports use configurable byte limits and visible truncation/omission markers.
+`TESTINEL_MAX_EVENT_BYTES` defaults to 786432 (minimum 16384),
+`TESTINEL_MAX_VALUE_BYTES` to 4096, and `TESTINEL_MAX_FRAME_LOCALS_BYTES` to 16384.
+The final check includes request IDs and the entire encoded JSON envelope.
+Compact v2 is negotiated with a capable server; older servers and file/custom
+backends receive bounded v1. Irreducible inventories disable reporting explicitly,
+without changing test execution or shortening identities. See the
+[protocol, limits, deprecations, and offline format](doc/diagnostic-protocol.md).

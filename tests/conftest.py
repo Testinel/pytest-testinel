@@ -1,5 +1,6 @@
+from collections.abc import Generator
+
 import pytest
-from typing import Generator
 
 pytest_plugins = ["pytester"]
 
